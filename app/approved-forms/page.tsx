@@ -178,7 +178,7 @@ export default function ApprovedFormsPage() {
 
       // Try to load and add logo with proper sizing
       try {
-        const logoImg = await loadImage('/isc-logo-long.png');
+        const logoImg = await loadImage('public/isc-logo-long.jpg');
         const logoWidth = 45;
         const logoHeight = (logoImg.height / logoImg.width) * logoWidth;
         

@@ -16,6 +16,8 @@ import {
   X,
   CheckCircle2,
   AlertCircle,
+  Eye,
+  ZoomIn,
 } from 'lucide-react';
 import {
   Dialog,
@@ -24,6 +26,7 @@ import {
   DialogHeader,
   DialogTitle,
 } from '@/components/ui/dialog';
+import { jsPDF } from 'jspdf';
 
 interface FormTemplate {
   id: string;
@@ -36,6 +39,7 @@ interface FormTemplate {
   fileSize?: number;
   fileType?: string;
   fields?: FormField[];
+  revisionNumber?: string;
 }
 
 interface FormField {
@@ -81,6 +85,8 @@ export function FormsManagement({
   const [extractedText, setExtractedText] = useState('');
   const [librariesLoaded, setLibrariesLoaded] = useState(false);
   const [currentStep, setCurrentStep] = useState(1);
+  const [showPreview, setShowPreview] = useState(false);
+  const [previewPdfBlob, setPreviewPdfBlob] = useState<Blob | null>(null);
 
   const [formTemplateData, setFormTemplateData] = useState({
     name: '',
@@ -88,6 +94,7 @@ export function FormsManagement({
     category: '',
     approvers: [] as string[],
     fields: [] as FormField[],
+    revisionNumber: '',
   });
 
   const [newField, setNewField] = useState<FormField>({
@@ -98,6 +105,27 @@ export function FormsManagement({
     placeholder: '',
     options: [],
   });
+
+  // Generate revision number
+  const generateRevisionNumber = () => {
+    const today = new Date();
+    const formattedDate = today.toLocaleDateString('en-US', {
+      day: 'numeric',
+      month: 'short',
+      year: 'numeric',
+    });
+    return `ISC LH Rev.00/ ${formattedDate}`;
+  };
+
+  // Initialize revision number when creating new form
+  useEffect(() => {
+    if (!editingForm && !formTemplateData.revisionNumber) {
+      setFormTemplateData(prev => ({
+        ...prev,
+        revisionNumber: generateRevisionNumber(),
+      }));
+    }
+  }, [editingForm]);
 
   useEffect(() => {
     const loadLibraries = async () => {
@@ -301,7 +329,6 @@ export function FormsManagement({
     console.log('Total lines:', lines.length);
     console.log('Raw text preview:', text.substring(0, 500));
 
-    // Helper function to normalize and deduplicate labels
     const normalizeLabel = (label: string): string => {
       return label.trim()
         .replace(/\s+/g, ' ')
@@ -313,12 +340,10 @@ export function FormsManagement({
       const normalized = normalizeLabel(label);
       const lowerNormalized = normalized.toLowerCase();
       
-      // Skip if already detected or if it's noise
       if (detectedLabels.has(lowerNormalized) || normalized.length < 2) {
         return;
       }
       
-      // Skip common noise words and section headers
       const noiseWords = ['notes', 'policies', 'required', 'notification', 'file', 'medical certificate', 
                           'leave type selection', 'sick leave credits', 'vacation leave credits',
                           'notes & policies'];
@@ -337,11 +362,9 @@ export function FormsManagement({
       console.log('✓ Added field:', normalized, '| Type:', type);
     };
 
-    // Process each line
     lines.forEach((line, index) => {
       console.log(`\nLine ${index}: "${line}"`);
 
-      // 1. Checkbox Detection - "[ ] LABEL" patterns
       const bracketMatches = line.matchAll(/\[\s*\]\s*([A-Z][A-Z\s]{2,40})/g);
       for (const match of bracketMatches) {
         const label = match[1].trim();
@@ -351,7 +374,6 @@ export function FormsManagement({
         }
       }
 
-      // 2. Pattern: "LABEL: ____" with underscores after colon
       const underscorePattern1 = /^([A-Z][A-Z\s\/\(\)\.,']{1,60}?):\s*_{2,}/i;
       const underscoreMatch1 = line.match(underscorePattern1);
       if (underscoreMatch1) {
@@ -371,7 +393,6 @@ export function FormsManagement({
         addField(label, fieldType, false);
       }
 
-      // 3. Pattern: "LABEL:____" with NO SPACE between colon and underscores
       const underscorePattern2 = /^([A-Z][A-Z\s\/\(\)\.,']{1,60}?):_{2,}/i;
       const underscoreMatch2 = line.match(underscorePattern2);
       if (underscoreMatch2 && !underscoreMatch1) {
@@ -390,7 +411,6 @@ export function FormsManagement({
         addField(label, fieldType, false);
       }
 
-      // 4. Pattern: Multiple fields on same line "LABEL1: ____ LABEL2:"
       const multiFieldPattern = /([A-Z][A-Z\s\/\(\)\.,']{2,40}?):\s*_{2,}/gi;
       const multiMatches = [...line.matchAll(multiFieldPattern)];
       if (multiMatches.length > 1) {
@@ -407,7 +427,6 @@ export function FormsManagement({
         });
       }
 
-      // 5. Pattern: "LABEL:" at end of line (value on next line or separate)
       const colonEndPattern = /^([A-Z][A-Z\s\/\(\)\.,']{2,60}?):\s*$/i;
       const colonEndMatch = line.match(colonEndPattern);
       if (colonEndMatch) {
@@ -426,16 +445,14 @@ export function FormsManagement({
         addField(label, fieldType, false);
       }
 
-      // 6. Pattern: Fields separated by spaces on same line (like in your PDF)
-      // Example: "SICK LEAVE TOTAL CREDITS: ____________________ SICK LEAVE LESS TAKEN: ____________________"
       if (line.includes('____') && line.split(':').length > 2) {
-        const parts = line.split(/\s{2,}/); // Split by multiple spaces
+        const parts = line.split(/\s{2,}/);
         parts.forEach(part => {
           const fieldMatch = part.match(/([A-Z][A-Z\s\/\(\)\.,']{2,50}?):\s*_{0,}/i);
           if (fieldMatch) {
             const label = fieldMatch[1].trim();
             console.log('  → Found spaced field:', label);
-            let fieldType: FormField['type'] = 'number'; // Most of these are numbers
+            let fieldType: FormField['type'] = 'number';
             
             const lowerLabel = label.toLowerCase();
             if (lowerLabel.includes('date')) fieldType = 'date';
@@ -452,6 +469,242 @@ export function FormsManagement({
     console.log('Fields:', fields.map(f => f.label).join(', '));
     
     return fields;
+  };
+
+  // Generate live preview PDF
+  const generateLivePreviewPDF = async (): Promise<jsPDF> => {
+    const pdf = new jsPDF('p', 'mm', 'a4');
+    const pageWidth = pdf.internal.pageSize.getWidth();
+    const pageHeight = pdf.internal.pageSize.getHeight();
+    const margin = 20;
+    let yPosition = margin;
+
+    // Load logo
+    const loadImage = (src: string): Promise<HTMLImageElement> => {
+      return new Promise((resolve, reject) => {
+        const img = new Image();
+        img.crossOrigin = 'anonymous';
+        img.onload = () => resolve(img);
+        img.onerror = reject;
+        img.src = src;
+      });
+    };
+
+    try {
+      const logoImg = await loadImage('/isc-logo-long.jpg');
+      const logoWidth = 45;
+      const logoHeight = (logoImg.height / logoImg.width) * logoWidth;
+      
+      const canvas = document.createElement('canvas');
+      canvas.width = logoImg.width;
+      canvas.height = logoImg.height;
+      const ctx = canvas.getContext('2d');
+      ctx?.drawImage(logoImg, 0, 0);
+      const logoData = canvas.toDataURL('image/png');
+      
+      pdf.addImage(logoData, 'PNG', margin, margin, logoWidth, Math.min(logoHeight, 18));
+    } catch (error) {
+      console.log('Logo not loaded');
+    }
+
+    // Header - Company Info
+    pdf.setTextColor(0, 0, 0);
+    pdf.setFontSize(10);
+    pdf.setFont('helvetica', 'bold');
+    pdf.text('INTER-WORLD SHIPPING CORPORATION', pageWidth - margin, margin, {
+      align: 'right',
+    });
+    
+    pdf.setFontSize(8);
+    pdf.setFont('helvetica', 'normal');
+    pdf.text('5F W. Deepz Bldg., MH Del Pilar St., Ermita, Manila', pageWidth - margin, margin + 5, {
+      align: 'right',
+    });
+    pdf.text('Tel. No.: (02) 7090-3591', pageWidth - margin, margin + 10, {
+      align: 'right',
+    });
+    pdf.text('www.interworldships.com', pageWidth - margin, margin + 15, {
+      align: 'right',
+    });
+
+    yPosition = margin + 30;
+
+    // Document title
+    pdf.setTextColor(80, 80, 80);
+    pdf.setFontSize(16);
+    pdf.setFont('helvetica', 'bold');
+    const formTitle = formTemplateData.name || 'FORM TEMPLATE';
+    pdf.text(formTitle.toUpperCase(), pageWidth / 2, yPosition, { align: 'center' });
+    yPosition += 12;
+
+    // Form content
+    pdf.setTextColor(0, 0, 0);
+    pdf.setFontSize(10);
+    pdf.setFont('helvetica', 'normal');
+
+    // Date field
+    pdf.text('DATE:', margin, yPosition);
+    pdf.setDrawColor(150, 150, 150);
+    pdf.setLineWidth(0.3);
+    pdf.line(margin + 20, yPosition + 1, margin + 70, yPosition + 1);
+    pdf.text('_________________', margin + 22, yPosition);
+    yPosition += 10;
+
+    // Display form fields
+    if (formTemplateData.fields && formTemplateData.fields.length > 0) {
+      for (const field of formTemplateData.fields) {
+        const label = field.label;
+        
+        pdf.setFont('helvetica', 'normal');
+        const labelText = `${label}:`;
+        pdf.text(labelText, margin, yPosition);
+        
+        const labelWidth = pdf.getTextWidth(labelText);
+        const valueX = margin + labelWidth + 3;
+        const lineEndX = pageWidth - margin - 50;
+        
+        pdf.setDrawColor(150, 150, 150);
+        pdf.line(valueX, yPosition + 1, lineEndX, yPosition + 1);
+        
+        yPosition += 8;
+
+        // Check if we need a new page
+        if (yPosition > pageHeight - 80) {
+          pdf.addPage();
+          yPosition = margin;
+        }
+      }
+    }
+
+    // Calculate signature section
+    const approvers = formTemplateData.approvers
+      .map(id => users.find(u => u.id === id))
+      .filter(Boolean);
+    
+    const signatureBlockHeight = 60;
+    const numSignatures = 1 + approvers.length;
+    const numRows = Math.ceil(numSignatures / 2);
+    const totalSignatureHeight = (numRows * signatureBlockHeight) + 10;
+
+    const spaceAvailable = pageHeight - yPosition - 20;
+    
+    if (spaceAvailable < totalSignatureHeight) {
+      pdf.addPage();
+      yPosition = margin;
+    } else {
+      yPosition += 15;
+    }
+
+    // Position signatures
+    const colWidth = (pageWidth - 2 * margin - 10) / 2;
+    let currentX = margin;
+    let currentY = yPosition;
+    let column = 0;
+
+    const drawSignature = (
+      name: string,
+      label: string,
+      position: string,
+      department: string
+    ) => {
+      // Signature placeholder
+      pdf.setFont('helvetica', 'italic');
+      pdf.setFontSize(11);
+      pdf.setTextColor(0, 102, 204);
+      pdf.text(name, currentX + colWidth / 2, currentY + 15, { align: 'center' });
+      
+      // Signature line
+      pdf.setDrawColor(0, 0, 0);
+      pdf.setLineWidth(0.4);
+      pdf.line(currentX + 15, currentY + 28, currentX + colWidth - 15, currentY + 28);
+      
+      // Label
+      pdf.setFont('helvetica', 'normal');
+      pdf.setFontSize(8);
+      pdf.setTextColor(0, 0, 0);
+      pdf.text(label, currentX + colWidth / 2, currentY + 33, { align: 'center' });
+      
+      // Name
+      pdf.setFontSize(8);
+      pdf.setFont('helvetica', 'bold');
+      pdf.text(name, currentX + colWidth / 2, currentY + 38, { align: 'center' });
+      
+      // Position
+      if (position) {
+        pdf.setFontSize(7);
+        pdf.setFont('helvetica', 'normal');
+        pdf.setTextColor(100, 100, 100);
+        pdf.text(position, currentX + colWidth / 2, currentY + 42, { align: 'center' });
+      }
+      
+      // Department
+      if (department) {
+        pdf.text(department, currentX + colWidth / 2, currentY + 46, { align: 'center' });
+      }
+      
+      // Date placeholder
+      pdf.setFontSize(7);
+      pdf.text('Date: ______________', currentX + colWidth / 2, currentY + 50, { align: 'center' });
+    };
+
+    // Employee signature
+    drawSignature(
+      '[Employee Name]',
+      'Signature of Employee',
+      '[Position]',
+      '[Department]'
+    );
+
+    column++;
+    currentX = margin + colWidth + 10;
+
+    // Approver signatures
+    if (approvers.length > 0) {
+      for (const [index, approver] of approvers.entries()) {
+        if (column >= 2) {
+          column = 0;
+          currentX = margin;
+          currentY += signatureBlockHeight;
+        }
+
+        const approvalLabel = index === 0 ? "Supervisor's Approval" : 
+                               index === 1 ? "HR Approval" : 
+                               index === 2 ? "Management Approval" :
+                               `Level ${index + 1} Approval`;
+        
+        drawSignature(
+          approver.fullName,
+          approvalLabel,
+          approver.position,
+          approver.department
+        );
+
+        column++;
+        currentX = margin + colWidth + 10;
+      }
+    }
+
+    // Footer with revision number
+    const footerY = pageHeight - 10;
+    pdf.setTextColor(0, 0, 0);
+    pdf.setFontSize(7);
+    pdf.setFont('helvetica', 'normal');
+    const revisionText = formTemplateData.revisionNumber || generateRevisionNumber();
+    pdf.text(revisionText, margin, footerY);
+
+    return pdf;
+  };
+
+  const handleShowPreview = async () => {
+    try {
+      const pdf = await generateLivePreviewPDF();
+      const blob = pdf.output('blob');
+      setPreviewPdfBlob(blob);
+      setShowPreview(true);
+    } catch (error) {
+      console.error('Error generating preview:', error);
+      alert('Failed to generate preview. Please try again.');
+    }
   };
 
   const handleSaveForm = async () => {
@@ -496,6 +749,7 @@ export function FormsManagement({
           category: formTemplateData.category.trim(),
           approvers: formTemplateData.approvers,
           fields: formTemplateData.fields,
+          revisionNumber: formTemplateData.revisionNumber || generateRevisionNumber(),
           updatedAt: new Date().toISOString(),
           ...(selectedFile ? fileData : {}),
         };
@@ -518,6 +772,7 @@ export function FormsManagement({
           category: formTemplateData.category.trim(),
           approvers: formTemplateData.approvers,
           fields: formTemplateData.fields,
+          revisionNumber: formTemplateData.revisionNumber || generateRevisionNumber(),
           createdAt: new Date().toISOString(),
           isActive: true,
           ...fileData,
@@ -545,6 +800,7 @@ export function FormsManagement({
         category: '',
         approvers: [],
         fields: [],
+        revisionNumber: '',
       });
     } catch (error: any) {
       console.error('Error saving form:', error);
@@ -578,6 +834,7 @@ export function FormsManagement({
       category: form.category,
       approvers: form.approvers || [],
       fields: form.fields || [],
+      revisionNumber: form.revisionNumber || generateRevisionNumber(),
     });
     setSelectedFile(null);
     setCurrentStep(1);
@@ -696,6 +953,7 @@ export function FormsManagement({
                 category: '',
                 approvers: [],
                 fields: [],
+                revisionNumber: generateRevisionNumber(),
               });
               setSelectedFile(null);
               setCurrentStep(1);
@@ -730,6 +988,11 @@ export function FormsManagement({
                     <p className="text-xs font-semibold text-primary mt-1">
                       {form.category}
                     </p>
+                    {form.revisionNumber && (
+                      <p className="text-xs text-muted-foreground mt-1">
+                        {form.revisionNumber}
+                      </p>
+                    )}
                   </div>
                   <div className="flex gap-2">
                     <button
@@ -871,6 +1134,23 @@ export function FormsManagement({
                   </div>
 
                   <div>
+                    <label className="block text-sm font-semibold text-foreground mb-2">
+                      Revision Number
+                    </label>
+                    <Input
+                      type="text"
+                      value={formTemplateData.revisionNumber}
+                      onChange={(e) => setFormTemplateData({ ...formTemplateData, revisionNumber: e.target.value })}
+                      placeholder="Auto-generated"
+                      className="text-base bg-secondary/30"
+                      readOnly
+                    />
+                    <p className="text-xs text-muted-foreground mt-1">
+                      Auto-generated on creation
+                    </p>
+                  </div>
+
+                  <div className="col-span-2">
                     <label className="block text-sm font-semibold text-foreground mb-2">
                       Status
                     </label>
@@ -1153,6 +1433,18 @@ export function FormsManagement({
             </Button>
 
             <div className="flex gap-2">
+              {/* Preview Button - Show on all steps if we have basic info */}
+              {canProceedToStep2() && (
+                <Button
+                  onClick={handleShowPreview}
+                  variant="outline"
+                  className="border-primary text-primary hover:bg-primary/10"
+                >
+                  <Eye size={18} className="mr-2" />
+                  Preview Form
+                </Button>
+              )}
+
               {currentStep < 3 ? (
                 <Button
                   onClick={() => setCurrentStep(currentStep + 1)}
@@ -1183,6 +1475,57 @@ export function FormsManagement({
           </div>
         </DialogContent>
       </Dialog>
+
+      {/* Live Preview Modal */}
+      {showPreview && previewPdfBlob && (
+        <div className="fixed inset-0 bg-black/70 backdrop-blur-sm z-[60] flex items-center justify-center p-2 md:p-4">
+          <div className="bg-card rounded-lg shadow-2xl w-full h-full md:h-[95vh] flex flex-col">
+            {/* Modal Header */}
+            <div className="flex items-center justify-between p-3 md:p-4 border-b border-border bg-card rounded-t-lg">
+              <div>
+                <h3 className="text-base md:text-lg font-bold text-foreground flex items-center gap-2">
+                  <ZoomIn size={20} className="text-primary" />
+                  Live Form Preview
+                </h3>
+                <p className="text-xs md:text-sm text-muted-foreground">
+                  {formTemplateData.name || 'Form Template'}
+                </p>
+              </div>
+              <div className="flex items-center gap-2">
+                <button
+                  onClick={() => {
+                    setShowPreview(false);
+                    setPreviewPdfBlob(null);
+                  }}
+                  className="p-2 hover:bg-secondary rounded-lg transition-colors"
+                >
+                  <X size={20} className="text-muted-foreground" />
+                </button>
+              </div>
+            </div>
+
+            {/* PDF Viewer */}
+            <div className="flex-1 overflow-hidden bg-gray-100">
+              <iframe
+                src={URL.createObjectURL(previewPdfBlob)}
+                className="w-full h-full"
+                title="Form Preview"
+              />
+            </div>
+
+            {/* Preview Footer Info */}
+            <div className="p-3 border-t border-border bg-secondary/30">
+              <div className="flex items-center justify-between text-xs text-muted-foreground">
+                <div className="flex items-center gap-4">
+                  <span>Fields: {formTemplateData.fields.length}</span>
+                  <span>Approvers: {formTemplateData.approvers.length}</span>
+                </div>
+                <span className="font-mono">{formTemplateData.revisionNumber}</span>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
     </>
   );
 }
