@@ -18,6 +18,7 @@ import {
   AlertCircle,
   Eye,
   ZoomIn,
+  GripVertical,
 } from 'lucide-react';
 import {
   Dialog,
@@ -26,7 +27,18 @@ import {
   DialogHeader,
   DialogTitle,
 } from '@/components/ui/dialog';
-import { jsPDF } from 'jspdf';
+import {
+  generateRevisionNumber,
+  generateFormPDF,
+  convertFileToBase64,
+  formatFileSize,
+  getApproverNames,
+  downloadFile,
+  FormField,
+  UserRecord,
+  FormTemplateData,
+} from './FormBuilderUtils';
+import { DocumentAnalyzer } from './DocumentAnalyzer';
 
 interface FormTemplate {
   id: string;
@@ -40,25 +52,7 @@ interface FormTemplate {
   fileType?: string;
   fields?: FormField[];
   revisionNumber?: string;
-}
-
-interface FormField {
-  id: string;
-  label: string;
-  type: 'text' | 'email' | 'textarea' | 'number' | 'date' | 'select' | 'checkbox';
-  required: boolean;
-  placeholder?: string;
-  options?: string[];
-}
-
-interface UserRecord {
-  id: string;
-  email: string;
-  fullName: string;
-  position: string;
-  department: string;
-  role: 'Employee' | 'Admin';
-  isApprover: boolean;
+  notes?: string;
 }
 
 interface FormsManagementProps {
@@ -81,20 +75,19 @@ export function FormsManagement({
   const [saving, setSaving] = useState(false);
   const [uploadingFile, setUploadingFile] = useState(false);
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
-  const [analyzingFile, setAnalyzingFile] = useState(false);
-  const [extractedText, setExtractedText] = useState('');
-  const [librariesLoaded, setLibrariesLoaded] = useState(false);
   const [currentStep, setCurrentStep] = useState(1);
   const [showPreview, setShowPreview] = useState(false);
   const [previewPdfBlob, setPreviewPdfBlob] = useState<Blob | null>(null);
+  const [draggedFieldIndex, setDraggedFieldIndex] = useState<number | null>(null);
 
-  const [formTemplateData, setFormTemplateData] = useState({
+  const [formTemplateData, setFormTemplateData] = useState<FormTemplateData>({
     name: '',
     description: '',
     category: '',
-    approvers: [] as string[],
-    fields: [] as FormField[],
+    approvers: [],
+    fields: [],
     revisionNumber: '',
+    notes: '',
   });
 
   const [newField, setNewField] = useState<FormField>({
@@ -106,17 +99,6 @@ export function FormsManagement({
     options: [],
   });
 
-  // Generate revision number
-  const generateRevisionNumber = () => {
-    const today = new Date();
-    const formattedDate = today.toLocaleDateString('en-US', {
-      day: 'numeric',
-      month: 'short',
-      year: 'numeric',
-    });
-    return `ISC LH Rev.00/ ${formattedDate}`;
-  };
-
   // Initialize revision number when creating new form
   useEffect(() => {
     if (!editingForm && !formTemplateData.revisionNumber) {
@@ -126,54 +108,6 @@ export function FormsManagement({
       }));
     }
   }, [editingForm]);
-
-  useEffect(() => {
-    const loadLibraries = async () => {
-      try {
-        if (!(window as any).pdfjsLib) {
-          const script1 = document.createElement('script');
-          script1.src = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js';
-          script1.async = true;
-          document.head.appendChild(script1);
-          
-          await new Promise((resolve) => {
-            script1.onload = resolve;
-          });
-          
-          (window as any).pdfjsLib.GlobalWorkerOptions.workerSrc = 
-            'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
-        }
-
-        if (!(window as any).mammoth) {
-          const script2 = document.createElement('script');
-          script2.src = 'https://cdnjs.cloudflare.com/ajax/libs/mammoth/1.6.0/mammoth.browser.min.js';
-          script2.async = true;
-          document.head.appendChild(script2);
-          await new Promise((resolve) => {
-            script2.onload = resolve;
-          });
-        }
-
-        if (!(window as any).XLSX) {
-          const script3 = document.createElement('script');
-          script3.src = 'https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js';
-          script3.async = true;
-          document.head.appendChild(script3);
-          await new Promise((resolve) => {
-            script3.onload = resolve;
-          });
-        }
-
-        setLibrariesLoaded(true);
-        console.log('All document processing libraries loaded successfully');
-      } catch (error) {
-        console.error('Error loading libraries:', error);
-        setLibrariesLoaded(true);
-      }
-    };
-
-    loadLibraries();
-  }, []);
 
   const handleFileSelect = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
@@ -198,512 +132,24 @@ export function FormsManagement({
     }
 
     setSelectedFile(file);
-    
-    if (librariesLoaded) {
-      await analyzeDocument(file);
-    } else {
-      alert('Document analysis libraries are still loading. Please wait and try again.');
-    }
-  };
-
-  const convertFileToBase64 = (file: File): Promise<string> => {
-    return new Promise((resolve, reject) => {
-      const reader = new FileReader();
-      reader.onload = () => {
-        const base64String = reader.result as string;
-        const base64Data = base64String.split(',')[1];
-        resolve(base64Data);
-      };
-      reader.onerror = () => reject(new Error('Failed to read file'));
-      reader.readAsDataURL(file);
-    });
-  };
-
-  const analyzeDocument = async (file: File) => {
-    setAnalyzingFile(true);
-    try {
-      let text = '';
-
-      console.log('Starting analysis for:', file.name, 'Type:', file.type);
-
-      if (file.type === 'application/pdf') {
-        text = await extractTextFromPDF(file);
-      } else if (file.type === 'application/vnd.openxmlformats-officedocument.wordprocessingml.document') {
-        text = await extractTextFromDOCX(file);
-      } else if (file.type === 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' || 
-                 file.type === 'application/vnd.ms-excel') {
-        text = await extractTextFromXLSX(file);
-      } else {
-        console.warn('Unsupported file type for auto-detection');
-        setAnalyzingFile(false);
-        return;
-      }
-
-      console.log('Extracted text length:', text.length);
-      setExtractedText(text);
-      
-      if (text.trim()) {
-        const detectedFields = detectFormFields(text);
-        console.log('Detected fields:', detectedFields);
-        
-        if (detectedFields.length > 0) {
-          setFormTemplateData({
-            ...formTemplateData,
-            fields: detectedFields,
-          });
-          alert(`✓ Successfully detected ${detectedFields.length} form fields!`);
-        } else {
-          alert('No form fields detected automatically. You can add fields manually below.');
-        }
-      } else {
-        alert('Could not extract text from document. Please add fields manually.');
-      }
-    } catch (error) {
-      console.error('Error analyzing document:', error);
-      alert('Error analyzing document: ' + (error as Error).message);
-    } finally {
-      setAnalyzingFile(false);
-    }
-  };
-
-  const extractTextFromPDF = async (file: File): Promise<string> => {
-    try {
-      const arrayBuffer = await file.arrayBuffer();
-      const loadingTask = (window as any).pdfjsLib.getDocument({ data: arrayBuffer });
-      const pdf = await loadingTask.promise;
-      
-      let fullText = '';
-      for (let i = 1; i <= pdf.numPages; i++) {
-        const page = await pdf.getPage(i);
-        const textContent = await page.getTextContent();
-        const pageText = textContent.items.map((item: any) => item.str).join(' ');
-        fullText += pageText + '\n';
-      }
-      
-      console.log('PDF extraction successful');
-      return fullText;
-    } catch (error) {
-      console.error('PDF extraction error:', error);
-      throw new Error('Failed to extract text from PDF');
-    }
-  };
-
-  const extractTextFromDOCX = async (file: File): Promise<string> => {
-    try {
-      const arrayBuffer = await file.arrayBuffer();
-      const result = await (window as any).mammoth.extractRawText({ arrayBuffer });
-      console.log('DOCX extraction successful');
-      return result.value;
-    } catch (error) {
-      console.error('DOCX extraction error:', error);
-      throw new Error('Failed to extract text from DOCX');
-    }
-  };
-
-  const extractTextFromXLSX = async (file: File): Promise<string> => {
-    try {
-      const arrayBuffer = await file.arrayBuffer();
-      const workbook = (window as any).XLSX.read(arrayBuffer, { type: 'array' });
-      
-      let fullText = '';
-      workbook.SheetNames.forEach((sheetName: string) => {
-        const sheet = workbook.Sheets[sheetName];
-        const csv = (window as any).XLSX.utils.sheet_to_csv(sheet);
-        fullText += csv + '\n';
-      });
-      
-      console.log('XLSX extraction successful');
-      return fullText;
-    } catch (error) {
-      console.error('XLSX extraction error:', error);
-      throw new Error('Failed to extract text from Excel file');
-    }
-  };
-
-  const detectFormFields = (text: string): FormField[] => {
-    const fields: FormField[] = [];
-    const lines = text.split('\n').map(line => line.trim()).filter(line => line);
-    const detectedLabels = new Set<string>();
-
-    console.log('=== FIELD DETECTION START ===');
-    console.log('Total lines:', lines.length);
-    console.log('Raw text preview:', text.substring(0, 500));
-
-    const normalizeLabel = (label: string): string => {
-      return label.trim()
-        .replace(/\s+/g, ' ')
-        .replace(/[:\s]*$/, '')
-        .replace(/^[:\s]+/, '');
-    };
-
-    const addField = (label: string, type: FormField['type'], required: boolean = false) => {
-      const normalized = normalizeLabel(label);
-      const lowerNormalized = normalized.toLowerCase();
-      
-      if (detectedLabels.has(lowerNormalized) || normalized.length < 2) {
-        return;
-      }
-      
-      const noiseWords = ['notes', 'policies', 'required', 'notification', 'file', 'medical certificate', 
-                          'leave type selection', 'sick leave credits', 'vacation leave credits',
-                          'notes & policies'];
-      if (noiseWords.some(noise => lowerNormalized === noise || lowerNormalized.includes(noise))) {
-        return;
-      }
-
-      fields.push({
-        id: `field_${Date.now()}_${Math.random()}`,
-        label: normalized,
-        type,
-        required,
-        placeholder: type === 'textarea' ? 'Enter details...' : `Enter ${normalized.toLowerCase()}`,
-      });
-      detectedLabels.add(lowerNormalized);
-      console.log('✓ Added field:', normalized, '| Type:', type);
-    };
-
-    lines.forEach((line, index) => {
-      console.log(`\nLine ${index}: "${line}"`);
-
-      const bracketMatches = line.matchAll(/\[\s*\]\s*([A-Z][A-Z\s]{2,40})/g);
-      for (const match of bracketMatches) {
-        const label = match[1].trim();
-        if (label && label.length >= 3 && label.length <= 40) {
-          console.log('  → Found checkbox:', label);
-          addField(label, 'checkbox', false);
-        }
-      }
-
-      const underscorePattern1 = /^([A-Z][A-Z\s\/\(\)\.,']{1,60}?):\s*_{2,}/i;
-      const underscoreMatch1 = line.match(underscorePattern1);
-      if (underscoreMatch1) {
-        const label = underscoreMatch1[1].trim();
-        console.log('  → Found underscore pattern 1:', label);
-        let fieldType: FormField['type'] = 'text';
-        
-        const lowerLabel = label.toLowerCase();
-        if (lowerLabel.includes('date')) fieldType = 'date';
-        else if (lowerLabel.includes('reason') || lowerLabel.includes('comment')) fieldType = 'textarea';
-        else if (lowerLabel.includes('no.') || lowerLabel.includes('days') || 
-                 lowerLabel.includes('credits') || lowerLabel.includes('balance') ||
-                 lowerLabel.includes('total') || lowerLabel.includes('taken') ||
-                 lowerLabel.includes('available') || lowerLabel.includes('remaining')) fieldType = 'number';
-        else if (lowerLabel.includes('name')) fieldType = 'text';
-        
-        addField(label, fieldType, false);
-      }
-
-      const underscorePattern2 = /^([A-Z][A-Z\s\/\(\)\.,']{1,60}?):_{2,}/i;
-      const underscoreMatch2 = line.match(underscorePattern2);
-      if (underscoreMatch2 && !underscoreMatch1) {
-        const label = underscoreMatch2[1].trim();
-        console.log('  → Found underscore pattern 2 (no space):', label);
-        let fieldType: FormField['type'] = 'text';
-        
-        const lowerLabel = label.toLowerCase();
-        if (lowerLabel.includes('date')) fieldType = 'date';
-        else if (lowerLabel.includes('reason') || lowerLabel.includes('comment')) fieldType = 'textarea';
-        else if (lowerLabel.includes('no.') || lowerLabel.includes('days') || 
-                 lowerLabel.includes('credits') || lowerLabel.includes('balance') ||
-                 lowerLabel.includes('total') || lowerLabel.includes('taken') ||
-                 lowerLabel.includes('available') || lowerLabel.includes('remaining')) fieldType = 'number';
-        
-        addField(label, fieldType, false);
-      }
-
-      const multiFieldPattern = /([A-Z][A-Z\s\/\(\)\.,']{2,40}?):\s*_{2,}/gi;
-      const multiMatches = [...line.matchAll(multiFieldPattern)];
-      if (multiMatches.length > 1) {
-        multiMatches.forEach(match => {
-          const label = match[1].trim();
-          console.log('  → Found multi-field pattern:', label);
-          let fieldType: FormField['type'] = 'text';
-          
-          const lowerLabel = label.toLowerCase();
-          if (lowerLabel.includes('date')) fieldType = 'date';
-          else if (lowerLabel.includes('no.') || lowerLabel.includes('days')) fieldType = 'number';
-          
-          addField(label, fieldType, false);
-        });
-      }
-
-      const colonEndPattern = /^([A-Z][A-Z\s\/\(\)\.,']{2,60}?):\s*$/i;
-      const colonEndMatch = line.match(colonEndPattern);
-      if (colonEndMatch) {
-        const label = colonEndMatch[1].trim();
-        console.log('  → Found colon-end pattern:', label);
-        let fieldType: FormField['type'] = 'text';
-        
-        const lowerLabel = label.toLowerCase();
-        if (lowerLabel.includes('date')) fieldType = 'date';
-        else if (lowerLabel.includes('comment') || lowerLabel.includes('notes') || lowerLabel.includes('reason')) fieldType = 'textarea';
-        else if (lowerLabel.includes('number') || lowerLabel.includes('days') ||
-                 lowerLabel.includes('credits') || lowerLabel.includes('balance') ||
-                 lowerLabel.includes('total') || lowerLabel.includes('taken') ||
-                 lowerLabel.includes('available') || lowerLabel.includes('remaining')) fieldType = 'number';
-        
-        addField(label, fieldType, false);
-      }
-
-      if (line.includes('____') && line.split(':').length > 2) {
-        const parts = line.split(/\s{2,}/);
-        parts.forEach(part => {
-          const fieldMatch = part.match(/([A-Z][A-Z\s\/\(\)\.,']{2,50}?):\s*_{0,}/i);
-          if (fieldMatch) {
-            const label = fieldMatch[1].trim();
-            console.log('  → Found spaced field:', label);
-            let fieldType: FormField['type'] = 'number';
-            
-            const lowerLabel = label.toLowerCase();
-            if (lowerLabel.includes('date')) fieldType = 'date';
-            else if (lowerLabel.includes('reason') || lowerLabel.includes('comment')) fieldType = 'textarea';
-            
-            addField(label, fieldType, false);
-          }
-        });
-      }
-    });
-
-    console.log('\n=== FIELD DETECTION COMPLETE ===');
-    console.log('Total fields found:', fields.length);
-    console.log('Fields:', fields.map(f => f.label).join(', '));
-    
-    return fields;
-  };
-
-  // Generate live preview PDF
-  const generateLivePreviewPDF = async (): Promise<jsPDF> => {
-    const pdf = new jsPDF('p', 'mm', 'a4');
-    const pageWidth = pdf.internal.pageSize.getWidth();
-    const pageHeight = pdf.internal.pageSize.getHeight();
-    const margin = 20;
-    let yPosition = margin;
-
-    // Load logo
-    const loadImage = (src: string): Promise<HTMLImageElement> => {
-      return new Promise((resolve, reject) => {
-        const img = new Image();
-        img.crossOrigin = 'anonymous';
-        img.onload = () => resolve(img);
-        img.onerror = reject;
-        img.src = src;
-      });
-    };
-
-    try {
-      const logoImg = await loadImage('/isc-logo-long.jpg');
-      const logoWidth = 45;
-      const logoHeight = (logoImg.height / logoImg.width) * logoWidth;
-      
-      const canvas = document.createElement('canvas');
-      canvas.width = logoImg.width;
-      canvas.height = logoImg.height;
-      const ctx = canvas.getContext('2d');
-      ctx?.drawImage(logoImg, 0, 0);
-      const logoData = canvas.toDataURL('image/png');
-      
-      pdf.addImage(logoData, 'PNG', margin, margin, logoWidth, Math.min(logoHeight, 18));
-    } catch (error) {
-      console.log('Logo not loaded');
-    }
-
-    // Header - Company Info
-    pdf.setTextColor(0, 0, 0);
-    pdf.setFontSize(10);
-    pdf.setFont('helvetica', 'bold');
-    pdf.text('INTER-WORLD SHIPPING CORPORATION', pageWidth - margin, margin, {
-      align: 'right',
-    });
-    
-    pdf.setFontSize(8);
-    pdf.setFont('helvetica', 'normal');
-    pdf.text('5F W. Deepz Bldg., MH Del Pilar St., Ermita, Manila', pageWidth - margin, margin + 5, {
-      align: 'right',
-    });
-    pdf.text('Tel. No.: (02) 7090-3591', pageWidth - margin, margin + 10, {
-      align: 'right',
-    });
-    pdf.text('www.interworldships.com', pageWidth - margin, margin + 15, {
-      align: 'right',
-    });
-
-    yPosition = margin + 30;
-
-    // Document title
-    pdf.setTextColor(80, 80, 80);
-    pdf.setFontSize(16);
-    pdf.setFont('helvetica', 'bold');
-    const formTitle = formTemplateData.name || 'FORM TEMPLATE';
-    pdf.text(formTitle.toUpperCase(), pageWidth / 2, yPosition, { align: 'center' });
-    yPosition += 12;
-
-    // Form content
-    pdf.setTextColor(0, 0, 0);
-    pdf.setFontSize(10);
-    pdf.setFont('helvetica', 'normal');
-
-    // Date field
-    pdf.text('DATE:', margin, yPosition);
-    pdf.setDrawColor(150, 150, 150);
-    pdf.setLineWidth(0.3);
-    pdf.line(margin + 20, yPosition + 1, margin + 70, yPosition + 1);
-    pdf.text('_________________', margin + 22, yPosition);
-    yPosition += 10;
-
-    // Display form fields
-    if (formTemplateData.fields && formTemplateData.fields.length > 0) {
-      for (const field of formTemplateData.fields) {
-        const label = field.label;
-        
-        pdf.setFont('helvetica', 'normal');
-        const labelText = `${label}:`;
-        pdf.text(labelText, margin, yPosition);
-        
-        const labelWidth = pdf.getTextWidth(labelText);
-        const valueX = margin + labelWidth + 3;
-        const lineEndX = pageWidth - margin - 50;
-        
-        pdf.setDrawColor(150, 150, 150);
-        pdf.line(valueX, yPosition + 1, lineEndX, yPosition + 1);
-        
-        yPosition += 8;
-
-        // Check if we need a new page
-        if (yPosition > pageHeight - 80) {
-          pdf.addPage();
-          yPosition = margin;
-        }
-      }
-    }
-
-    // Calculate signature section
-    const approvers = formTemplateData.approvers
-      .map(id => users.find(u => u.id === id))
-      .filter(Boolean);
-    
-    const signatureBlockHeight = 60;
-    const numSignatures = 1 + approvers.length;
-    const numRows = Math.ceil(numSignatures / 2);
-    const totalSignatureHeight = (numRows * signatureBlockHeight) + 10;
-
-    const spaceAvailable = pageHeight - yPosition - 20;
-    
-    if (spaceAvailable < totalSignatureHeight) {
-      pdf.addPage();
-      yPosition = margin;
-    } else {
-      yPosition += 15;
-    }
-
-    // Position signatures
-    const colWidth = (pageWidth - 2 * margin - 10) / 2;
-    let currentX = margin;
-    let currentY = yPosition;
-    let column = 0;
-
-    const drawSignature = (
-      name: string,
-      label: string,
-      position: string,
-      department: string
-    ) => {
-      // Signature placeholder
-      pdf.setFont('helvetica', 'italic');
-      pdf.setFontSize(11);
-      pdf.setTextColor(0, 102, 204);
-      pdf.text(name, currentX + colWidth / 2, currentY + 15, { align: 'center' });
-      
-      // Signature line
-      pdf.setDrawColor(0, 0, 0);
-      pdf.setLineWidth(0.4);
-      pdf.line(currentX + 15, currentY + 28, currentX + colWidth - 15, currentY + 28);
-      
-      // Label
-      pdf.setFont('helvetica', 'normal');
-      pdf.setFontSize(8);
-      pdf.setTextColor(0, 0, 0);
-      pdf.text(label, currentX + colWidth / 2, currentY + 33, { align: 'center' });
-      
-      // Name
-      pdf.setFontSize(8);
-      pdf.setFont('helvetica', 'bold');
-      pdf.text(name, currentX + colWidth / 2, currentY + 38, { align: 'center' });
-      
-      // Position
-      if (position) {
-        pdf.setFontSize(7);
-        pdf.setFont('helvetica', 'normal');
-        pdf.setTextColor(100, 100, 100);
-        pdf.text(position, currentX + colWidth / 2, currentY + 42, { align: 'center' });
-      }
-      
-      // Department
-      if (department) {
-        pdf.text(department, currentX + colWidth / 2, currentY + 46, { align: 'center' });
-      }
-      
-      // Date placeholder
-      pdf.setFontSize(7);
-      pdf.text('Date: ______________', currentX + colWidth / 2, currentY + 50, { align: 'center' });
-    };
-
-    // Employee signature
-    drawSignature(
-      '[Employee Name]',
-      'Signature of Employee',
-      '[Position]',
-      '[Department]'
-    );
-
-    column++;
-    currentX = margin + colWidth + 10;
-
-    // Approver signatures
-    if (approvers.length > 0) {
-      for (const [index, approver] of approvers.entries()) {
-        if (column >= 2) {
-          column = 0;
-          currentX = margin;
-          currentY += signatureBlockHeight;
-        }
-
-        const approvalLabel = index === 0 ? "Supervisor's Approval" : 
-                               index === 1 ? "HR Approval" : 
-                               index === 2 ? "Management Approval" :
-                               `Level ${index + 1} Approval`;
-        
-        drawSignature(
-          approver.fullName,
-          approvalLabel,
-          approver.position,
-          approver.department
-        );
-
-        column++;
-        currentX = margin + colWidth + 10;
-      }
-    }
-
-    // Footer with revision number
-    const footerY = pageHeight - 10;
-    pdf.setTextColor(0, 0, 0);
-    pdf.setFontSize(7);
-    pdf.setFont('helvetica', 'normal');
-    const revisionText = formTemplateData.revisionNumber || generateRevisionNumber();
-    pdf.text(revisionText, margin, footerY);
-
-    return pdf;
   };
 
   const handleShowPreview = async () => {
     try {
-      const pdf = await generateLivePreviewPDF();
+      const pdf = await generateFormPDF(formTemplateData, users);
       const blob = pdf.output('blob');
       setPreviewPdfBlob(blob);
       setShowPreview(true);
     } catch (error) {
       console.error('Error generating preview:', error);
       alert('Failed to generate preview. Please try again.');
+    }
+  };
+
+  const handleClosePreview = () => {
+    if (window.confirm('Are you sure you want to close the preview? Your current progress will not be saved.')) {
+      setShowPreview(false);
+      setPreviewPdfBlob(null);
     }
   };
 
@@ -750,6 +196,7 @@ export function FormsManagement({
           approvers: formTemplateData.approvers,
           fields: formTemplateData.fields,
           revisionNumber: formTemplateData.revisionNumber || generateRevisionNumber(),
+          notes: formTemplateData.notes || '',
           updatedAt: new Date().toISOString(),
           ...(selectedFile ? fileData : {}),
         };
@@ -773,6 +220,7 @@ export function FormsManagement({
           approvers: formTemplateData.approvers,
           fields: formTemplateData.fields,
           revisionNumber: formTemplateData.revisionNumber || generateRevisionNumber(),
+          notes: formTemplateData.notes || '',
           createdAt: new Date().toISOString(),
           isActive: true,
           ...fileData,
@@ -801,6 +249,7 @@ export function FormsManagement({
         approvers: [],
         fields: [],
         revisionNumber: '',
+        notes: '',
       });
     } catch (error: any) {
       console.error('Error saving form:', error);
@@ -835,6 +284,7 @@ export function FormsManagement({
       approvers: form.approvers || [],
       fields: form.fields || [],
       revisionNumber: form.revisionNumber || generateRevisionNumber(),
+      notes: form.notes || '',
     });
     setSelectedFile(null);
     setCurrentStep(1);
@@ -854,22 +304,6 @@ export function FormsManagement({
     } else {
       alert('Unable to add yourself as approver. Please try reloading the page.');
     }
-  };
-
-  const formatFileSize = (bytes?: number): string => {
-    if (!bytes) return 'Unknown size';
-    const kb = bytes / 1024;
-    if (kb < 1024) return `${kb.toFixed(1)} KB`;
-    return `${(kb / 1024).toFixed(1)} MB`;
-  };
-
-  const getApproverNames = (approverIds: string[]): string => {
-    return (
-      approverIds
-        .map((id) => users.find((u) => u.id === id)?.fullName)
-        .filter(Boolean)
-        .join(', ') || 'None'
-    );
   };
 
   const addField = () => {
@@ -905,36 +339,29 @@ export function FormsManagement({
     });
   };
 
-  const downloadFile = (fileData: string, fileName: string, fileType: string) => {
-    try {
-      const byteCharacters = atob(fileData);
-      const byteNumbers = new Array(byteCharacters.length);
-      for (let i = 0; i < byteCharacters.length; i++) {
-        byteNumbers[i] = byteCharacters.charCodeAt(i);
-      }
-      const byteArray = new Uint8Array(byteNumbers);
-      const blob = new Blob([byteArray], { type: fileType });
+  // Drag and drop handlers
+  const handleDragStart = (index: number) => {
+    setDraggedFieldIndex(index);
+  };
 
-      const url = window.URL.createObjectURL(blob);
-      const link = document.createElement('a');
-      link.href = url;
-      link.download = fileName;
-      document.body.appendChild(link);
-      link.click();
-      document.body.removeChild(link);
-      window.URL.revokeObjectURL(url);
-    } catch (error) {
-      console.error('Error downloading file:', error);
-      alert('Error downloading file. Please try again.');
-    }
+  const handleDragOver = (e: React.DragEvent, index: number) => {
+    e.preventDefault();
+  };
+
+  const handleDrop = (e: React.DragEvent, dropIndex: number) => {
+    e.preventDefault();
+    if (draggedFieldIndex === null) return;
+
+    const newFields = [...formTemplateData.fields];
+    const [draggedField] = newFields.splice(draggedFieldIndex, 1);
+    newFields.splice(dropIndex, 0, draggedField);
+
+    setFormTemplateData({ ...formTemplateData, fields: newFields });
+    setDraggedFieldIndex(null);
   };
 
   const canProceedToStep2 = () => {
     return formTemplateData.name && formTemplateData.description && formTemplateData.category;
-  };
-
-  const canProceedToStep3 = () => {
-    return formTemplateData.fields.length > 0 || selectedFile;
   };
 
   return (
@@ -1045,7 +472,7 @@ export function FormsManagement({
                     Approvers ({form.approvers?.length || 0}):
                   </p>
                   <p className="text-xs text-foreground">
-                    {getApproverNames(form.approvers || [])}
+                    {getApproverNames(form.approvers || [], users)}
                   </p>
                 </div>
               </Card>
@@ -1149,16 +576,6 @@ export function FormsManagement({
                       Auto-generated on creation
                     </p>
                   </div>
-
-                  <div className="col-span-2">
-                    <label className="block text-sm font-semibold text-foreground mb-2">
-                      Status
-                    </label>
-                    <div className="flex items-center gap-2 px-4 py-3 border border-border rounded-lg bg-secondary/30">
-                      <CheckCircle2 size={18} className="text-green-600" />
-                      <span className="text-sm text-foreground">Active Template</span>
-                    </div>
-                  </div>
                 </div>
 
                 {!canProceedToStep2() && (
@@ -1180,58 +597,13 @@ export function FormsManagement({
                     <label className="block text-sm font-semibold text-foreground mb-2">
                       Upload Form Template (Optional)
                     </label>
-                    <p className="text-xs text-muted-foreground mb-3">
-                      Upload a document (PDF, DOCX, XLSX) and we'll automatically detect form fields!
-                      {!librariesLoaded && ' (Loading analysis tools...)'}
-                    </p>
-                    {analyzingFile && (
-                      <div className="mb-3 p-3 bg-blue-50 dark:bg-blue-900/20 border border-blue-200 dark:border-blue-800 rounded-lg flex items-center gap-3">
-                        <div className="animate-spin rounded-full h-5 w-5 border-b-2 border-blue-600"></div>
-                        <span className="text-sm text-blue-700 dark:text-blue-300">
-                          Analyzing document and detecting form fields...
-                        </span>
-                      </div>
-                    )}
-                    <div className="border-2 border-dashed border-border rounded-lg p-8 text-center bg-secondary/30 hover:bg-secondary/50 transition-colors">
-                      <input
-                        type="file"
-                        id="formFile"
-                        accept=".pdf,.doc,.docx,.xls,.xlsx"
-                        onChange={handleFileSelect}
-                        className="hidden"
-                        disabled={analyzingFile}
-                      />
-                      <label htmlFor="formFile" className="cursor-pointer flex flex-col items-center gap-3">
-                        <Upload size={40} className="text-muted-foreground" />
-                        {selectedFile ? (
-                          <div className="text-sm">
-                            <p className="font-semibold text-foreground text-lg">{selectedFile.name}</p>
-                            <p className="text-muted-foreground mt-1">{formatFileSize(selectedFile.size)}</p>
-                            {formTemplateData.fields.length > 0 && (
-                              <div className="mt-2 inline-flex items-center gap-2 px-3 py-1 bg-green-50 dark:bg-green-900/20 border border-green-200 dark:border-green-800 rounded-full">
-                                <CheckCircle2 size={14} className="text-green-600" />
-                                <span className="text-xs text-green-700 dark:text-green-300 font-medium">
-                                  {formTemplateData.fields.length} fields detected
-                                </span>
-                              </div>
-                            )}
-                          </div>
-                        ) : editingForm?.fileData ? (
-                          <div className="text-sm">
-                            <p className="font-semibold text-foreground text-lg">{editingForm.fileName}</p>
-                            <p className="text-xs text-muted-foreground mt-1">Click to replace file</p>
-                          </div>
-                        ) : (
-                          <div className="text-sm">
-                            <p className="font-semibold text-foreground text-lg">Click to upload document</p>
-                            <p className="text-muted-foreground mt-1">PDF, DOC, DOCX, XLS, XLSX (Max 5MB)</p>
-                            <p className="text-xs text-primary mt-2">
-                              {librariesLoaded ? '✓ Auto-detection ready' : '⏳ Loading analysis tools...'}
-                            </p>
-                          </div>
-                        )}
-                      </label>
-                    </div>
+                    <DocumentAnalyzer
+                      onFileSelect={handleFileSelect}
+                      selectedFile={selectedFile}
+                      onFieldsDetected={(fields) => {
+                        setFormTemplateData({ ...formTemplateData, fields });
+                      }}
+                    />
                   </div>
 
                   {/* Form Fields Section */}
@@ -1245,17 +617,28 @@ export function FormsManagement({
                     {formTemplateData.fields.length > 0 && (
                       <div className="space-y-2 mb-4 max-h-60 overflow-y-auto">
                         {formTemplateData.fields.map((field, index) => (
-                          <div key={field.id} className="flex items-center gap-3 p-3 bg-secondary/50 hover:bg-secondary rounded-lg border border-border">
+                          <div
+                            key={field.id}
+                            draggable
+                            onDragStart={() => handleDragStart(index)}
+                            onDragOver={(e) => handleDragOver(e, index)}
+                            onDrop={(e) => handleDrop(e, index)}
+                            className="flex items-center gap-3 p-3 bg-secondary/50 hover:bg-secondary rounded-lg border border-border cursor-move"
+                          >
+                            <div className="flex-shrink-0 cursor-grab active:cursor-grabbing">
+                              <GripVertical size={18} className="text-muted-foreground" />
+                            </div>
                             <div className="flex-shrink-0 w-8 h-8 rounded-full bg-primary/10 flex items-center justify-center">
                               <span className="text-sm font-semibold text-primary">{index + 1}</span>
                             </div>
                             <div className="flex-1 min-w-0">
-                              <p className="text-sm font-semibold text-foreground truncate">
+                              <p className="text-sm font-semibold text-foreground truncate flex items-center gap-2">
                                 {field.label}
                                 {field.required && <span className="text-destructive ml-1">*</span>}
                               </p>
                               <p className="text-xs text-muted-foreground">
-                                Type: {field.type} {field.placeholder && `• ${field.placeholder}`}
+                                Type: {field.type}
+                                {field.placeholder && ` • ${field.placeholder}`}
                               </p>
                             </div>
                             <button
@@ -1305,7 +688,7 @@ export function FormsManagement({
                             onChange={(e) => setNewField({ ...newField, required: e.target.checked })}
                             className="w-4 h-4"
                           />
-                          <span className="text-sm text-foreground">Required Field</span>
+                          <span className="text-sm text-foreground">Required</span>
                         </label>
 
                         <Input
@@ -1333,6 +716,27 @@ export function FormsManagement({
 
             {currentStep === 3 && (
               <div className="space-y-6 p-4">
+                {/* Notes Section */}
+                <div>
+                  <label className="block text-sm font-semibold text-foreground mb-2">
+                    Form Notes (Optional)
+                  </label>
+                  <p className="text-sm text-muted-foreground mb-3">
+                    Add any important notes, policies, or instructions that will appear above the signature section in the PDF
+                  </p>
+                  <textarea
+                    value={formTemplateData.notes}
+                    onChange={(e) => setFormTemplateData({ ...formTemplateData, notes: e.target.value })}
+                    className="w-full px-4 py-3 border border-border rounded-lg bg-background text-foreground focus:ring-2 focus:ring-primary focus:border-transparent resize-none text-sm"
+                    placeholder="e.g., All leave requests must be submitted at least 3 days in advance. Sick leave requires medical certificate for absences exceeding 3 days..."
+                    rows={5}
+                  />
+                  <p className="text-xs text-muted-foreground mt-2">
+                    These notes will appear in the PDF document above the signature section
+                  </p>
+                </div>
+
+                {/* Approvers Section */}
                 <div>
                   <label className="block text-sm font-semibold text-foreground mb-3">
                     Assign Approvers
@@ -1493,10 +897,7 @@ export function FormsManagement({
               </div>
               <div className="flex items-center gap-2">
                 <button
-                  onClick={() => {
-                    setShowPreview(false);
-                    setPreviewPdfBlob(null);
-                  }}
+                  onClick={handleClosePreview}
                   className="p-2 hover:bg-secondary rounded-lg transition-colors"
                 >
                   <X size={20} className="text-muted-foreground" />

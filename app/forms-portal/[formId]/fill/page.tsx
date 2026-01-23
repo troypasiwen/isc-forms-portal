@@ -17,7 +17,19 @@ import {
   Timestamp,
   updateDoc,
 } from 'firebase/firestore';
-import { ChevronLeft, Upload, Send, Download, Eye, AlertCircle, Lock, FileSignature } from 'lucide-react';
+import { 
+  ChevronLeft, 
+  Upload, 
+  Send, 
+  Download, 
+  Eye, 
+  AlertCircle, 
+  Lock, 
+  FileSignature,
+  FileText,
+  Check,
+  X
+} from 'lucide-react';
 import Link from 'next/link';
 
 interface FormField {
@@ -34,6 +46,7 @@ interface FormTemplate {
   name: string;
   description: string;
   category: string;
+  notes?: string;
   approvers: string[];
   fields: FormField[];
   fileData?: string;
@@ -45,88 +58,34 @@ interface FormTemplate {
 // Smart field ordering function
 const organizeFields = (fields: FormField[]): FormField[] => {
   const orderPriority: Record<string, number> = {
-    // Personal information (highest priority)
-    'name': 1,
-    'full name': 1,
-    'employee name': 1,
-    'your name': 1,
-    
-    // Position/Department
-    'position': 2,
-    'title': 2,
-    'role': 2,
+    'name': 1, 'full name': 1, 'employee name': 1, 'your name': 1,
+    'position': 2, 'title': 2, 'role': 2,
     'department': 3,
-    
-    // Contact information
     'email': 4,
-    'phone': 5,
-    'contact': 5,
-    
-    // Leave/Time related
-    'leave type': 6,
-    'type of leave': 6,
-    'start date': 7,
-    'from date': 7,
-    'end date': 8,
-    'to date': 8,
-    'date from': 7,
-    'date to': 8,
-    'number of days': 9,
-    'days': 9,
-    'total days': 9,
-    
-    // Credits/Balance
-    'credits': 10,
-    'balance': 10,
-    'available': 10,
-    'remaining': 10,
-    'sick leave': 11,
-    'vacation leave': 11,
-    
-    // Reason/Details (lower priority)
-    'reason': 50,
-    'purpose': 50,
-    'details': 51,
-    'description': 51,
-    'comments': 52,
-    'notes': 52,
-    'remarks': 52,
-    
-    // Attachments/Additional
-    'attachment': 60,
-    'medical certificate': 60,
-    
-    // Acknowledgment checkboxes (lowest priority)
-    'acknowledge': 100,
-    'agree': 100,
-    'confirm': 100,
-    'certify': 100,
+    'phone': 5, 'contact': 5,
+    'leave type': 6, 'type of leave': 6,
+    'start date': 7, 'from date': 7,
+    'end date': 8, 'to date': 8,
+    'number of days': 9, 'days': 9, 'total days': 9,
+    'credits': 10, 'balance': 10,
+    'reason': 50, 'purpose': 50,
+    'details': 51, 'description': 51,
+    'comments': 52, 'notes': 52,
+    'acknowledge': 100, 'agree': 100,
   };
 
   const getFieldPriority = (field: FormField): number => {
     const labelLower = field.label.toLowerCase();
-    
-    // Check for exact or partial matches
     for (const [key, priority] of Object.entries(orderPriority)) {
-      if (labelLower.includes(key)) {
-        return priority;
-      }
+      if (labelLower.includes(key)) return priority;
     }
-    
-    // Default priorities by type
     if (field.type === 'checkbox') return 100;
     if (field.type === 'textarea') return 50;
     if (field.type === 'date') return 15;
-    
-    // Default middle priority
     return 30;
   };
 
-  return [...fields].sort((a, b) => {
-    const priorityA = getFieldPriority(a);
-    const priorityB = getFieldPriority(b);
-    return priorityA - priorityB;
-  });
+  return [...fields].sort((a, b) => getFieldPriority(a) - getFieldPriority(b));
 };
 
 export default function FillFormPage() {
@@ -144,8 +103,9 @@ export default function FillFormPage() {
   const [showSignatureModal, setShowSignatureModal] = useState(false);
   const [signatureFile, setSignatureFile] = useState<any>(null);
   const [userSignature, setUserSignature] = useState<string | null>(null);
+  const [hasAgreed, setHasAgreed] = useState(false);
 
-  // Fetch user's signature on mount
+  // Fetch user's signature
   useEffect(() => {
     const fetchUserSignature = async () => {
       if (!user) return;
@@ -162,7 +122,7 @@ export default function FillFormPage() {
     fetchUserSignature();
   }, [user]);
 
-  // Auto-fill fields that match user data
+  // Auto-fill fields
   useEffect(() => {
     if (formTemplate && userData) {
       const autoFillData: Record<string, any> = {};
@@ -170,24 +130,20 @@ export default function FillFormPage() {
       formTemplate.fields.forEach(field => {
         const labelLower = field.label.toLowerCase();
         
-        // Auto-fill name fields
         if (labelLower.includes('name') && 
             (labelLower.includes('your') || labelLower.includes('employee') || 
              labelLower.includes('full') || labelLower === 'name')) {
           autoFillData[field.id] = userData.fullName || '';
         }
         
-        // Auto-fill department fields
         if (labelLower.includes('department')) {
           autoFillData[field.id] = userData.department || '';
         }
         
-        // Auto-fill position/title fields
         if (labelLower.includes('position') || labelLower.includes('title') || labelLower.includes('role')) {
           autoFillData[field.id] = userData.position || '';
         }
         
-        // Auto-fill email fields
         if (labelLower.includes('email') && 
             (labelLower.includes('your') || labelLower.includes('employee'))) {
           autoFillData[field.id] = userData.email || user?.email || '';
@@ -198,10 +154,8 @@ export default function FillFormPage() {
     }
   }, [formTemplate, userData, user]);
 
-  // Check if a field should be auto-filled and locked
   const isAutoFilledField = (field: FormField): boolean => {
     const labelLower = field.label.toLowerCase();
-    
     return (
       (labelLower.includes('name') && 
        (labelLower.includes('your') || labelLower.includes('employee') || 
@@ -228,7 +182,7 @@ export default function FillFormPage() {
           setFormTemplate({
             id: formDocSnap.id,
             ...data,
-            fields: data.fields ? organizeFields(data.fields) : [], // Organize fields on load
+            fields: data.fields ? organizeFields(data.fields) : [],
           } as FormTemplate);
         }
       } catch (error) {
@@ -242,10 +196,7 @@ export default function FillFormPage() {
   }, [formId]);
 
   const handleInputChange = (fieldId: string, value: any) => {
-    setFormData((prev) => ({
-      ...prev,
-      [fieldId]: value,
-    }));
+    setFormData((prev) => ({ ...prev, [fieldId]: value }));
   };
 
   const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -293,9 +244,6 @@ export default function FillFormPage() {
       if (event.target?.result) {
         setSignatureFile(event.target.result as string);
       }
-    };
-    reader.onerror = () => {
-      alert('Error reading file. Please try again.');
     };
     reader.readAsDataURL(file);
   };
@@ -401,6 +349,11 @@ export default function FillFormPage() {
       return;
     }
 
+    if (!hasAgreed) {
+      alert('Please confirm that you have read and understood the form requirements.');
+      return;
+    }
+
     setSubmitting(true);
 
     try {
@@ -464,12 +417,12 @@ export default function FillFormPage() {
   if (loading) {
     return (
       <ProtectedRoute>
-        <div className="flex">
+        <div className="flex min-h-screen bg-gradient-to-br from-slate-50 via-blue-50 to-indigo-50">
           <Sidebar />
-          <main className="flex-1 bg-background md:ml-64 p-6 md:p-8">
-            <Card className="p-8 text-center">
+          <main className="flex-1 md:ml-64 p-4 sm:p-6 lg:p-8">
+            <Card className="p-8 text-center bg-white/80 backdrop-blur-sm shadow-lg">
               <div className="flex flex-col items-center gap-3">
-                <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary"></div>
+                <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600"></div>
                 <p className="text-muted-foreground">Loading form...</p>
               </div>
             </Card>
@@ -482,15 +435,14 @@ export default function FillFormPage() {
   if (!formTemplate) {
     return (
       <ProtectedRoute>
-        <div className="flex">
+        <div className="flex min-h-screen bg-gradient-to-br from-slate-50 via-blue-50 to-indigo-50">
           <Sidebar />
-          <main className="flex-1 bg-background md:ml-64 p-6 md:p-8">
-            <Card className="p-8 text-center">
+          <main className="flex-1 md:ml-64 p-4 sm:p-6 lg:p-8">
+            <Card className="p-8 text-center bg-white/80 backdrop-blur-sm shadow-lg">
               <AlertCircle className="mx-auto text-destructive mb-4" size={48} />
               <p className="text-destructive text-lg font-semibold">Form not found</p>
-              <p className="text-muted-foreground mt-2">This form may have been deleted or you don't have access to it.</p>
               <Link href="/forms-portal">
-                <Button className="mt-6 bg-primary hover:bg-primary/90">
+                <Button className="mt-6 bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-700 hover:to-indigo-700 text-white shadow-md">
                   Back to Forms Portal
                 </Button>
               </Link>
@@ -506,129 +458,144 @@ export default function FillFormPage() {
 
   return (
     <ProtectedRoute>
-      <div className="flex">
+      <div className="flex min-h-screen bg-gradient-to-br from-slate-50 via-blue-50 to-indigo-50">
         <Sidebar />
 
-        <main className="flex-1 bg-background md:ml-64 overflow-y-auto h-screen">
-          {/* Header - Fixed */}
-          <div className="sticky top-0 z-10 bg-card border-b border-border p-6 md:p-8">
-            <Link href="/forms-portal" className="inline-flex items-center text-primary hover:text-primary/80 mb-4 transition-colors">
-              <ChevronLeft size={20} className="mr-1" />
+        <main className="flex-1 md:ml-64 overflow-y-auto">
+          {/* Header - Sticky */}
+          <div className="sticky top-0 z-10 bg-white/95 backdrop-blur-sm border-b border-slate-200 shadow-sm p-4 sm:p-5">
+            <Link 
+              href="/forms-portal" 
+              className="inline-flex items-center text-slate-600 hover:text-slate-900 mb-3 transition-colors text-sm font-medium group"
+            >
+              <ChevronLeft size={16} className="mr-1 group-hover:-translate-x-1 transition-transform" />
               Back to Forms Portal
             </Link>
-            <div className="flex flex-col md:flex-row md:items-start md:justify-between gap-4">
+            
+            <div className="flex flex-col lg:flex-row lg:items-center lg:justify-between gap-3">
               <div className="flex-1">
-                <h1 className="text-3xl font-bold text-foreground">
+                <h1 className="text-xl font-semibold text-slate-900">
                   {formTemplate.name}
                 </h1>
-                <p className="text-muted-foreground mt-2 max-w-2xl text-base">
+                <p className="text-slate-600 mt-1 text-sm">
                   {formTemplate.description}
                 </p>
-                <div className="flex flex-wrap items-center gap-2 mt-3">
-                  <span className="inline-block text-sm font-semibold px-3 py-1 bg-primary/10 text-primary rounded-full">
-                    {formTemplate.category}
-                  </span>
-                  {requiredFieldsCount > 0 && (
-                    <span className="inline-block text-sm font-medium px-3 py-1 bg-muted text-muted-foreground rounded-full">
-                      {filledRequiredFields}/{requiredFieldsCount} required fields completed
-                    </span>
-                  )}
-                </div>
               </div>
-              {formTemplate.fileData && (
-                <Button
-                  onClick={downloadReferenceDoc}
-                  variant="outline"
-                  className="shrink-0"
-                >
-                  <Download size={18} className="mr-2" />
-                  Download Reference
-                </Button>
-              )}
+              
+              <div className="flex items-center gap-2">
+                <span className="text-xs font-medium px-3 py-1 bg-blue-50 text-blue-700 rounded-md border border-blue-100">
+                  {formTemplate.category}
+                </span>
+                {requiredFieldsCount > 0 && (
+                  <span className="text-xs font-medium px-3 py-1 bg-slate-100 text-slate-600 rounded-md">
+                    {filledRequiredFields}/{requiredFieldsCount} required
+                  </span>
+                )}
+                {formTemplate.fileData && (
+                  <>
+                    <Link href={`/forms-portal/view/${formId}`}>
+                      <Button variant="outline" size="sm" className="h-8 text-xs border-slate-300">
+                        <Eye size={14} className="mr-1" />
+                        View
+                      </Button>
+                    </Link>
+                    <Button
+                      onClick={downloadReferenceDoc}
+                      variant="outline"
+                      size="sm"
+                      className="h-8 text-xs border-slate-300"
+                    >
+                      <Download size={14} className="mr-1" />
+                      Download
+                    </Button>
+                  </>
+                )}
+              </div>
             </div>
           </div>
 
-          {/* Form - Scrollable */}
-          <div className="p-6 md:p-8 max-w-6xl mx-auto pb-20">
+          {/* Form Content */}
+          <div className="p-4 sm:p-5 max-w-5xl mx-auto pb-16">
             {status === 'submitted' && (
-              <Card className="p-6 mb-6 bg-green-50 border-green-200">
-                <div className="flex items-center gap-3">
-                  <div className="flex-shrink-0 w-8 h-8 bg-green-500 rounded-full flex items-center justify-center text-white">
-                    ✓
+              <div className="p-4 mb-4 bg-green-50 border border-green-200 rounded-lg">
+                <div className="flex items-center gap-2">
+                  <div className="flex-shrink-0 w-5 h-5 bg-green-500 rounded-full flex items-center justify-center text-white">
+                    <Check size={14} />
                   </div>
-                  <p className="text-green-700 font-semibold text-base">
-                    Form submitted successfully! Redirecting to submissions...
+                  <p className="text-green-700 font-medium text-sm">
+                    Form submitted successfully! Redirecting...
                   </p>
                 </div>
-              </Card>
+              </div>
             )}
 
             {status === 'draft' && (
-              <Card className="p-6 mb-6 bg-blue-50 border-blue-200">
-                <div className="flex items-center gap-3">
-                  <div className="flex-shrink-0 w-8 h-8 bg-blue-500 rounded-full flex items-center justify-center text-white">
-                    ✓
+              <div className="p-4 mb-4 bg-blue-50 border border-blue-200 rounded-lg">
+                <div className="flex items-center gap-2">
+                  <div className="flex-shrink-0 w-5 h-5 bg-blue-500 rounded-full flex items-center justify-center text-white">
+                    <Check size={14} />
                   </div>
-                  <p className="text-blue-700 font-semibold text-base">
+                  <p className="text-blue-700 font-medium text-sm">
                     Draft saved successfully! Redirecting...
                   </p>
                 </div>
-              </Card>
+              </div>
             )}
 
-            <Card className="p-8 md:p-10 space-y-8">
-              {formTemplate.fileData && (
-                <div className="bg-blue-50 border border-blue-200 rounded-lg p-5">
-                  <div className="flex items-start gap-3">
-                    <AlertCircle className="text-blue-600 flex-shrink-0 mt-0.5" size={22} />
-                    <div>
-                      <p className="text-base font-medium text-blue-900">Reference Document Available</p>
-                      <p className="text-sm text-blue-700 mt-1">
-                        A reference document is available for this form. Use the "Download Reference" button above to view the original template.
-                      </p>
-                    </div>
+            {/* Notes Section */}
+            {formTemplate.notes && (
+              <div className="p-4 mb-4 bg-amber-50 border border-amber-200 rounded-lg">
+                <div className="flex items-start gap-2">
+                  <AlertCircle className="text-amber-600 flex-shrink-0 mt-0.5" size={16} />
+                  <div className="flex-1 min-w-0">
+                    <p className="font-medium text-amber-900 text-sm mb-1">Important Notes</p>
+                    <p className="text-amber-800 text-xs leading-relaxed whitespace-pre-wrap">
+                      {formTemplate.notes}
+                    </p>
                   </div>
                 </div>
-              )}
+              </div>
+            )}
 
+            <div className="p-5 space-y-6 bg-white border border-slate-200 rounded-lg shadow-sm">
               {/* User Info Section */}
-              <div className="bg-muted/50 rounded-lg p-5 border border-border">
-                <h3 className="text-base font-semibold text-foreground mb-4">Submitter Information</h3>
-                <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+              <div className="bg-slate-50 rounded-lg p-4 border border-slate-200">
+                <h3 className="text-sm font-semibold text-slate-900 mb-3">Submitter Information</h3>
+                <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
                   <div>
-                    <span className="text-sm text-muted-foreground">Name:</span>
-                    <p className="font-medium text-foreground text-base">{userData?.fullName || 'N/A'}</p>
+                    <span className="text-xs text-slate-500">Name</span>
+                    <p className="font-medium text-slate-900 text-sm">{userData?.fullName || 'N/A'}</p>
                   </div>
                   <div>
-                    <span className="text-sm text-muted-foreground">Department:</span>
-                    <p className="font-medium text-foreground text-base">{userData?.department || 'N/A'}</p>
+                    <span className="text-xs text-slate-500">Department</span>
+                    <p className="font-medium text-slate-900 text-sm">{userData?.department || 'N/A'}</p>
                   </div>
                   <div>
-                    <span className="text-sm text-muted-foreground">Position:</span>
-                    <p className="font-medium text-foreground text-base">{userData?.position || 'N/A'}</p>
+                    <span className="text-xs text-slate-500">Position</span>
+                    <p className="font-medium text-slate-900 text-sm">{userData?.position || 'N/A'}</p>
                   </div>
                 </div>
               </div>
 
               {/* Signature Section */}
-              <div className="bg-amber-50 border border-amber-200 rounded-lg p-5">
+              <div className="bg-blue-50 border border-blue-200 rounded-lg p-4">
                 <div className="flex items-start justify-between gap-3">
-                  <div className="flex items-start gap-3 flex-1">
-                    <FileSignature className="text-amber-600 flex-shrink-0 mt-0.5" size={22} />
-                    <div className="flex-1">
-                      <p className="text-base font-medium text-amber-900">Digital Signature</p>
+                  <div className="flex items-start gap-2 flex-1">
+                    <FileSignature className="text-blue-600 flex-shrink-0 mt-0.5" size={16} />
+                    <div className="flex-1 min-w-0">
+                      <p className="text-sm font-medium text-blue-900">Digital Signature Required</p>
                       {userSignature ? (
-                        <div className="mt-3">
-                          <div className="bg-white border-2 border-amber-300 rounded p-4 inline-block">
-                            <img src={userSignature} alt="Signature" className="h-20 max-w-xs" />
+                        <div className="mt-2">
+                          <div className="bg-white border border-blue-200 rounded p-2 inline-block">
+                            <img src={userSignature} alt="Signature" className="h-12 max-w-[200px]" />
                           </div>
-                          <p className="text-sm text-amber-700 mt-2">
-                            Signature will be added to the submitted form along with your name, position, and department.
+                          <p className="text-xs text-blue-700 mt-1">
+                            Signature will be attached to submission
                           </p>
                         </div>
                       ) : (
-                        <p className="text-base text-amber-700 mt-2">
-                          Please upload your signature. It will be added to the form upon submission.
+                        <p className="text-xs text-blue-700 mt-1">
+                          Upload your signature to enable submission
                         </p>
                       )}
                     </div>
@@ -636,23 +603,23 @@ export default function FillFormPage() {
                   <Button
                     onClick={() => setShowSignatureModal(true)}
                     variant="outline"
-                    size="default"
-                    className="shrink-0"
+                    size="sm"
+                    className="shrink-0 h-8 text-xs border-blue-300 hover:bg-blue-100"
                   >
-                    <Upload size={18} className="mr-2" />
+                    <Upload size={14} className="mr-1" />
                     {userSignature ? 'Change' : 'Upload'}
                   </Button>
                 </div>
               </div>
 
-              {/* Form Fields - Organized in 2-column grid */}
+              {/* Form Fields */}
               {formTemplate.fields && formTemplate.fields.length > 0 ? (
-                <div className="space-y-6">
-                  <h3 className="text-xl font-semibold text-foreground pb-3 border-b-2 border-border">
-                    Form Details
+                <div className="space-y-5">
+                  <h3 className="text-sm font-semibold text-slate-900 pb-2 border-b border-slate-200">
+                    Fill Out Form
                   </h3>
                   
-                  <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+                  <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
                     {formTemplate.fields.map((field) => {
                       const isLocked = isAutoFilledField(field);
                       const isFullWidth = field.type === 'textarea' || 
@@ -662,14 +629,14 @@ export default function FillFormPage() {
                                          field.label.toLowerCase().includes('description');
                       
                       return (
-                        <div key={field.id} className={`space-y-3 ${isFullWidth ? 'lg:col-span-2' : ''}`}>
-                          <label className="flex items-center gap-2 text-base font-semibold text-foreground">
+                        <div key={field.id} className={`space-y-2 ${isFullWidth ? 'lg:col-span-2' : ''}`}>
+                          <label className="flex items-center gap-1.5 text-sm font-medium text-slate-700">
                             {field.label}
                             {field.required && (
-                              <span className="text-destructive text-lg">*</span>
+                              <span className="text-red-500">*</span>
                             )}
                             {isLocked && (
-                              <Lock size={16} className="text-muted-foreground" />
+                              <Lock size={12} className="text-blue-500" />
                             )}
                           </label>
 
@@ -677,36 +644,30 @@ export default function FillFormPage() {
                             <textarea
                               placeholder={field.placeholder}
                               value={formData[field.id] || ''}
-                              onChange={(e) =>
-                                handleInputChange(field.id, e.target.value)
-                              }
+                              onChange={(e) => handleInputChange(field.id, e.target.value)}
                               disabled={submitting || isLocked}
-                              className={`w-full px-4 py-3 text-base border border-input rounded-lg bg-background text-foreground placeholder-muted-foreground focus:outline-none focus:ring-2 focus:ring-primary focus:border-transparent transition-all disabled:opacity-50 ${isLocked ? 'bg-muted cursor-not-allowed' : ''}`}
-                              rows={5}
+                              className={`w-full px-3 py-2 text-sm border rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-all ${isLocked ? 'bg-slate-50 border-slate-200 cursor-not-allowed' : 'border-slate-300 bg-white'} disabled:opacity-50`}
+                              rows={4}
                             />
                           ) : field.type === 'checkbox' ? (
-                            <div className="flex items-center gap-3 p-4 border border-input rounded-lg bg-background">
+                            <div className="flex items-center gap-2 p-3 border border-slate-300 rounded-md bg-white">
                               <input
                                 type="checkbox"
                                 checked={formData[field.id] || false}
-                                onChange={(e) =>
-                                  handleInputChange(field.id, e.target.checked)
-                                }
+                                onChange={(e) => handleInputChange(field.id, e.target.checked)}
                                 disabled={submitting || isLocked}
-                                className="w-5 h-5 cursor-pointer disabled:opacity-50 rounded border-gray-300 text-primary focus:ring-primary focus:ring-2"
+                                className="w-4 h-4 cursor-pointer disabled:opacity-50 rounded border-slate-300 text-blue-600 focus:ring-blue-500 focus:ring-2"
                               />
-                              <span className="text-base text-foreground">
+                              <span className="text-sm text-slate-700">
                                 {field.placeholder || 'Check to confirm'}
                               </span>
                             </div>
                           ) : field.type === 'select' ? (
                             <select
                               value={formData[field.id] || ''}
-                              onChange={(e) =>
-                                handleInputChange(field.id, e.target.value)
-                              }
+                              onChange={(e) => handleInputChange(field.id, e.target.value)}
                               disabled={submitting || isLocked}
-                              className={`w-full px-4 py-3 text-base border border-input rounded-lg bg-background text-foreground focus:outline-none focus:ring-2 focus:ring-primary focus:border-transparent transition-all disabled:opacity-50 ${isLocked ? 'bg-muted cursor-not-allowed' : ''}`}
+                              className={`w-full px-3 py-2 text-sm border rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-all ${isLocked ? 'bg-slate-50 border-slate-200 cursor-not-allowed' : 'border-slate-300 bg-white'} disabled:opacity-50`}
                             >
                               <option value="">Select an option</option>
                               {field.options?.map((option) => (
@@ -720,18 +681,16 @@ export default function FillFormPage() {
                               type={field.type}
                               placeholder={field.placeholder}
                               value={formData[field.id] || ''}
-                              onChange={(e) =>
-                                handleInputChange(field.id, e.target.value)
-                              }
+                              onChange={(e) => handleInputChange(field.id, e.target.value)}
                               disabled={submitting || isLocked}
-                              className={`transition-all text-base h-12 ${isLocked ? 'bg-muted cursor-not-allowed' : ''}`}
+                              className={`transition-all text-sm h-10 ${isLocked ? 'bg-slate-50 border-slate-200 cursor-not-allowed' : 'border-slate-300'}`}
                             />
                           )}
                           
                           {isLocked && (
-                            <p className="text-sm text-muted-foreground flex items-center gap-1">
-                              <Lock size={14} />
-                              This field is automatically filled from your profile and cannot be edited
+                            <p className="text-xs text-blue-600 flex items-center gap-1">
+                              <Lock size={10} />
+                              Auto-filled from profile
                             </p>
                           )}
                         </div>
@@ -743,21 +702,20 @@ export default function FillFormPage() {
                 <div className="text-center py-12 text-muted-foreground">
                   <AlertCircle className="mx-auto mb-3" size={48} />
                   <p className="font-medium text-lg">No fields defined for this form yet.</p>
-                  <p className="text-base mt-2">Please contact an administrator to set up this form.</p>
                 </div>
               )}
 
               {/* File Upload */}
               {formTemplate.fields && formTemplate.fields.length > 0 && (
-                <div className="space-y-4 pt-4">
-                  <label className="block text-base font-semibold text-foreground">
-                    Additional Attachments <span className="text-muted-foreground font-normal">(Optional)</span>
+                <div className="space-y-3">
+                  <label className="block text-sm font-medium text-slate-700">
+                    Attachments <span className="text-slate-500 font-normal text-xs">(Optional)</span>
                   </label>
-                  <div className="border-2 border-dashed border-border rounded-lg p-10 text-center hover:border-primary/50 hover:bg-primary/5 transition-all">
-                    <Upload className="mx-auto text-muted-foreground mb-3" size={48} />
+                  <div className="border-2 border-dashed border-slate-300 rounded-lg p-5 text-center hover:border-blue-400 hover:bg-blue-50/30 transition-all cursor-pointer">
+                    <Upload className="mx-auto text-slate-400 mb-2" size={24} />
                     <label className="cursor-pointer">
-                      <p className="text-base font-medium text-foreground mb-1">
-                        Click to upload files or drag and drop
+                      <p className="text-sm font-medium text-slate-700">
+                        Click to upload or drag and drop
                       </p>
                       <input
                         type="file"
@@ -768,44 +726,40 @@ export default function FillFormPage() {
                         accept=".pdf,.doc,.docx,.png,.jpg,.jpeg"
                       />
                     </label>
-                    <p className="text-sm text-muted-foreground mt-2">
-                      PDF, Word documents, or images (Max 5MB per file)
+                    <p className="text-xs text-slate-500 mt-1">
+                      PDF, Word, or Images (Max 5MB)
                     </p>
                   </div>
 
                   {attachments.length > 0 && (
                     <div className="space-y-2">
-                      <p className="text-base font-medium text-foreground">
-                        Attached files ({attachments.length}):
+                      <p className="text-sm font-medium text-slate-700">
+                        Attached ({attachments.length}):
                       </p>
                       {attachments.map((file: any, idx) => (
                         <div
                           key={idx}
-                          className="flex items-center justify-between p-4 bg-secondary rounded-lg border border-border"
+                          className="flex items-center justify-between p-3 bg-slate-50 rounded-md border border-slate-200"
                         >
-                          <div className="flex items-center gap-3 flex-1 min-w-0">
-                            <div className="w-10 h-10 bg-primary/10 rounded flex items-center justify-center flex-shrink-0">
-                              <span className="text-sm font-bold text-primary">
+                          <div className="flex items-center gap-2 flex-1 min-w-0">
+                            <div className="w-8 h-8 bg-blue-100 rounded flex items-center justify-center flex-shrink-0">
+                              <span className="text-xs font-bold text-blue-600">
                                 {file.name.split('.').pop()?.toUpperCase()}
                               </span>
                             </div>
-                            <span className="text-base text-foreground truncate">
+                            <span className="text-sm text-slate-700 truncate">
                               {file.name}
                             </span>
-                            <span className="text-sm text-muted-foreground flex-shrink-0">
+                            <span className="text-xs text-slate-500 flex-shrink-0">
                               ({(file.size / 1024).toFixed(1)} KB)
                             </span>
                           </div>
                           <button
-                            onClick={() =>
-                              setAttachments((prev) =>
-                                prev.filter((_, i) => i !== idx)
-                              )
-                            }
+                            onClick={() => setAttachments((prev) => prev.filter((_, i) => i !== idx))}
                             disabled={submitting}
-                            className="text-destructive text-base hover:underline ml-3 flex-shrink-0"
+                            className="text-red-600 hover:text-red-700 ml-2 flex-shrink-0"
                           >
-                            Remove
+                            <X size={16} />
                           </button>
                         </div>
                       ))}
@@ -814,48 +768,75 @@ export default function FillFormPage() {
                 </div>
               )}
 
+              {/* Agreement Checkbox */}
+              {formTemplate.fields && formTemplate.fields.length > 0 && (
+                <div className="bg-blue-50 border border-blue-200 rounded-lg p-4">
+                  <div className="flex items-start gap-2">
+                    <input
+                      type="checkbox"
+                      checked={hasAgreed}
+                      onChange={(e) => setHasAgreed(e.target.checked)}
+                      disabled={submitting}
+                      className="w-4 h-4 mt-0.5 cursor-pointer rounded border-blue-300 text-blue-600 focus:ring-blue-500 focus:ring-2"
+                    />
+                    <div className="flex-1">
+                      <p className="text-sm font-medium text-blue-900 mb-1">
+                        I certify that:
+                      </p>
+                      <ul className="space-y-0.5 text-xs text-blue-800">
+                        <li>• All information provided is true and accurate</li>
+                        <li>• I have read and understood the requirements{formTemplate.notes ? ' and notes' : ''}</li>
+                        <li>• My digital signature is legally binding</li>
+                      </ul>
+                    </div>
+                  </div>
+                </div>
+              )}
+
               {/* Action Buttons */}
               {formTemplate.fields && formTemplate.fields.length > 0 && (
-                <div className="flex flex-col sm:flex-row gap-4 pt-6 border-t border-border">
+                <div className="flex flex-col sm:flex-row gap-3 pt-4 border-t border-slate-200">
                   <Button
                     onClick={handleSaveDraft}
                     disabled={submitting}
                     variant="outline"
-                    className="flex-1 h-12 text-base"
+                    className="flex-1 h-10 text-sm border-slate-300"
                   >
                     {submitting ? 'Saving...' : 'Save as Draft'}
                   </Button>
                   <Button
                     onClick={handleSubmitForm}
-                    disabled={submitting || filledRequiredFields < requiredFieldsCount || !userSignature}
-                    className="flex-1 h-12 bg-primary hover:bg-primary/90 text-primary-foreground font-medium text-base"
+                    disabled={submitting || filledRequiredFields < requiredFieldsCount || !userSignature || !hasAgreed}
+                    className="flex-1 h-10 bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-700 hover:to-indigo-700 text-white font-medium text-sm shadow-sm disabled:opacity-50 disabled:cursor-not-allowed"
                   >
-                    <Send size={20} className="mr-2" />
+                    <Send size={16} className="mr-1.5" />
                     {submitting ? 'Submitting...' : 'Submit Form'}
                   </Button>
                 </div>
               )}
-            </Card>
+            </div>
           </div>
         </main>
 
-        {/* Signature Upload Modal - Wider landscape format */}
+        {/* Signature Upload Modal */}
         {showSignatureModal && (
           <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
-            <div className="bg-white rounded-lg shadow-xl max-w-4xl w-full max-h-[90vh] flex flex-col">
-              <div className="p-8 border-b border-border shrink-0">
-                <h2 className="text-2xl font-bold text-foreground">Upload Your Signature</h2>
-                <p className="text-base text-muted-foreground mt-2">
-                  Upload an image of your signature. This will be saved to your profile and used for all form submissions.
+            <div className="bg-white rounded-lg shadow-2xl max-w-2xl w-full max-h-[85vh] flex flex-col">
+              <div className="p-5 border-b border-slate-200 shrink-0">
+                <h2 className="text-lg font-semibold text-slate-900">
+                  Upload Signature
+                </h2>
+                <p className="text-sm text-slate-600 mt-1">
+                  This will be saved to your profile for all submissions.
                 </p>
               </div>
               
-              <div className="p-8 space-y-6 overflow-y-auto flex-1">
-                <div className="border-2 border-dashed border-border rounded-lg p-10 text-center hover:border-primary/50 hover:bg-primary/5 transition-all">
-                  <FileSignature className="mx-auto text-muted-foreground mb-4" size={56} />
+              <div className="p-5 space-y-4 overflow-y-auto flex-1">
+                <div className="border-2 border-dashed border-slate-300 rounded-lg p-6 text-center hover:border-blue-400 hover:bg-blue-50/30 transition-all">
+                  <FileSignature className="mx-auto text-blue-600 mb-3" size={40} />
                   <label className="cursor-pointer block">
-                    <span className="text-base font-medium text-foreground mb-2 block">
-                      Click here to select your signature image
+                    <span className="text-sm font-medium text-slate-700 mb-2 block">
+                      Select your signature image
                     </span>
                     <input
                       type="file"
@@ -863,63 +844,46 @@ export default function FillFormPage() {
                       className="hidden"
                       accept="image/png,image/jpeg,image/jpg,image/gif"
                     />
-                    <span className="inline-block mt-3 px-6 py-3 text-base bg-primary text-primary-foreground rounded-md hover:bg-primary/90 transition-colors">
+                    <span className="inline-block mt-2 px-4 py-2 text-sm bg-gradient-to-r from-blue-600 to-indigo-600 text-white rounded-md hover:from-blue-700 hover:to-indigo-700 transition-colors">
                       Choose File
                     </span>
                   </label>
-                  <p className="text-sm text-muted-foreground mt-4">
-                    Accepted formats: PNG, JPG, JPEG, GIF (Maximum file size: 2MB)
+                  <p className="text-xs text-slate-500 mt-3">
+                    PNG, JPG, JPEG, GIF (Max 2MB)
                   </p>
                 </div>
 
                 {signatureFile && (
-                  <div className="bg-muted/50 rounded-lg p-6 border border-border">
-                    <p className="text-base font-medium text-foreground mb-4">Signature Preview:</p>
-                    <div className="bg-white border-2 border-border rounded-lg p-8 flex items-center justify-center min-h-[200px]">
+                  <div className="bg-slate-50 rounded-lg p-4 border border-slate-200">
+                    <p className="text-sm font-medium text-slate-700 mb-3">Preview:</p>
+                    <div className="bg-white border border-slate-200 rounded-lg p-4 flex items-center justify-center min-h-[150px]">
                       <img 
                         src={signatureFile} 
                         alt="Signature preview" 
-                        className="max-h-40 max-w-full object-contain"
+                        className="max-h-32 max-w-full object-contain"
                       />
                     </div>
-                    <p className="text-sm text-muted-foreground mt-3">
-                      This is how your signature will appear on submitted forms.
-                    </p>
                   </div>
                 )}
-
-                <div className="bg-blue-50 border border-blue-200 rounded-lg p-6">
-                  <div className="flex gap-4">
-                    <AlertCircle className="text-blue-600 flex-shrink-0 mt-0.5" size={22} />
-                    <div className="text-base text-blue-900 space-y-3">
-                      <p className="font-medium">Important Information:</p>
-                      <ul className="list-disc list-inside space-y-2 text-sm">
-                        <li>The signature will be automatically added to all forms you submit</li>
-                        <li>It will appear alongside your printed name, position, and department</li>
-                        <li>You can update your signature anytime by uploading a new image</li>
-                      </ul>
-                    </div>
-                  </div>
-                </div>
               </div>
 
-              <div className="p-8 border-t border-border bg-muted/30 flex gap-4 shrink-0">
+              <div className="p-5 border-t border-slate-200 bg-slate-50 flex gap-3 shrink-0">
                 <Button
                   onClick={() => {
                     setShowSignatureModal(false);
                     setSignatureFile(null);
                   }}
                   variant="outline"
-                  className="flex-1 h-12 text-base"
+                  className="flex-1 h-10 text-sm"
                 >
                   Cancel
                 </Button>
                 <Button
                   onClick={handleSaveSignature}
                   disabled={!signatureFile}
-                  className="flex-1 h-12 text-base bg-primary hover:bg-primary/90 disabled:opacity-50"
+                  className="flex-1 h-10 text-sm bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-700 hover:to-indigo-700 text-white disabled:opacity-50"
                 >
-                  <FileSignature size={20} className="mr-2" />
+                  <FileSignature size={16} className="mr-1.5" />
                   Save Signature
                 </Button>
               </div>
