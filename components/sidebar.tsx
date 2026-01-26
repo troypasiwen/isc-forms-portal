@@ -13,8 +13,6 @@ import {
   LogOut,
   Menu,
   X,
-  Bell,
-  User,
 } from 'lucide-react';
 
 export function Sidebar() {
@@ -72,7 +70,14 @@ export function Sidebar() {
     <>
       {/* Mobile Toggle */}
       <div className="fixed top-0 left-0 right-0 z-40 flex items-center justify-between bg-primary p-4 text-primary-foreground md:hidden">
-        <h1 className="text-xl font-bold">ISC Portal</h1>
+        <div className="flex items-center gap-3">
+          <img 
+            src="/isc-logo.png" 
+            alt="ISC Logo" 
+            className="h-8 w-auto object-contain"
+          />
+          <h1 className="text-xl font-bold">ISC Portal</h1>
+        </div>
         <button
           onClick={() => setIsOpen(!isOpen)}
           className="p-2 hover:bg-primary/80 rounded-lg"
@@ -88,12 +93,21 @@ export function Sidebar() {
         }`}
       >
         <div className="flex flex-col h-full">
-          {/* Logo */}
-          <div className="p-6 border-b border-sidebar-border hidden md:block">
-            <h1 className="text-2xl font-bold text-sidebar-primary">
+          {/* Logo Section - Desktop */}
+          <div className="p-4 border-b border-sidebar-border hidden md:block">
+            <div className="flex items-center justify-center mb-3">
+              <div className="bg-white rounded-lg p-2 shadow-sm">
+                <img 
+                  src="/isc-logo.png" 
+                  alt="ISC Logo" 
+                  className="h-14 w-auto object-contain"
+                />
+              </div>
+            </div>
+            <h1 className="text-sm font-bold text-sidebar-primary text-center leading-tight whitespace-nowrap">
               Inter-World Shipping Corp.
             </h1>
-            <p className="text-xs text-sidebar-foreground/70 mt-1">
+            <p className="text-xs text-sidebar-foreground/70 mt-1 text-center">
               Forms Portal
             </p>
           </div>
