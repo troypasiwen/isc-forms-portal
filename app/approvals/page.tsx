@@ -3,6 +3,7 @@
 import { useState, useEffect, useRef } from 'react';
 import { ProtectedRoute } from '@/components/protected-route';
 import { Sidebar } from '@/components/sidebar';
+
 import { Card } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { useAuth } from '@/lib/auth-context';
@@ -453,7 +454,6 @@ export default function ApprovalsPage() {
     <ProtectedRoute>
       <div className="flex min-h-screen bg-gradient-to-br from-slate-50 via-blue-50 to-indigo-50">
         <Sidebar />
-
         <main className="flex-1 md:ml-64">
           <div className="bg-white/95 backdrop-blur-sm border-b border-slate-200 shadow-sm p-4 md:p-5">
             <h1 className="text-xl font-semibold text-slate-900">

@@ -1,22 +1,43 @@
 'use client';
 
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { useAuth } from '@/lib/auth-context';
 import { NotificationBell } from '@/components/notifications';
 import { Button } from '@/components/ui/button';
 import { Avatar, AvatarImage, AvatarFallback } from '@/components/ui/avatar';
 import { LogOut, Settings } from 'lucide-react';
 import Link from 'next/link';
+import { doc, onSnapshot } from 'firebase/firestore';
+import { db } from '@/lib/firebase';
 
 export function TopBar() {
-  const { userData, logout } = useAuth();
+  const { userData, logout, user } = useAuth();
   const [isProfileOpen, setIsProfileOpen] = useState(false);
+  const [profilePicture, setProfilePicture] = useState<string | null>(null);
 
   const initials = (userData?.fullName || 'U')
     .split(' ')
     .map((n) => n[0])
     .join('')
     .toUpperCase();
+
+  // Real-time listener for profile picture updates
+  useEffect(() => {
+    if (!user?.uid) return;
+
+    const userRef = doc(db, 'users', user.uid);
+    const unsubscribe = onSnapshot(userRef, (docSnap) => {
+      if (docSnap.exists()) {
+        const data = docSnap.data();
+        setProfilePicture(data.profilePicture || null);
+      }
+    });
+
+    return () => unsubscribe();
+  }, [user?.uid]);
+
+  // Use real-time profile picture if available, otherwise fall back to userData
+  const currentProfilePicture = profilePicture || userData?.profilePicture || '/placeholder.svg';
 
   return (
     <div className="hidden md:flex items-center justify-between px-8 py-4 bg-card border-b border-border">
@@ -36,7 +57,7 @@ export function TopBar() {
           >
             <Avatar className="w-8 h-8">
               <AvatarImage
-                src={userData?.profilePicture || "/placeholder.svg"}
+                src={currentProfilePicture}
                 alt={userData?.fullName}
               />
               <AvatarFallback className="bg-primary text-primary-foreground font-semibold">

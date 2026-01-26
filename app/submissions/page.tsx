@@ -3,6 +3,7 @@
 import { useState, useEffect } from 'react';
 import { ProtectedRoute } from '@/components/protected-route';
 import { Sidebar } from '@/components/sidebar';
+
 import { Card } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { useAuth } from '@/lib/auth-context';
@@ -207,7 +208,6 @@ export default function SubmissionsPage() {
     <ProtectedRoute>
       <div className="flex">
         <Sidebar />
-
         <main className="flex-1 bg-background md:ml-64">
           <div className="bg-card border-b border-border p-6 md:p-8">
             <div className="flex items-center justify-between">

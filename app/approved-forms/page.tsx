@@ -222,7 +222,6 @@ export default function ApprovedFormsPage() {
     <ProtectedRoute>
       <div className="flex">
         <Sidebar />
-
         <main className="flex-1 bg-background md:ml-64">
           <div className="bg-card border-b border-border p-6 md:p-8">
             <h1 className="text-3xl font-bold text-foreground">

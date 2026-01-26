@@ -42,9 +42,6 @@ interface FormField {
   isNote?: boolean;
 }
 
-/**
- * Load an image from a URL and convert to data URL
- */
 const loadImage = (src: string): Promise<HTMLImageElement> => {
   return new Promise((resolve, reject) => {
     const img = new Image();
@@ -55,9 +52,6 @@ const loadImage = (src: string): Promise<HTMLImageElement> => {
   });
 };
 
-/**
- * Get form template with fields and notes
- */
 const getTemplateData = async (formTemplateId: string): Promise<{ fields: FormField[], notes: string }> => {
   try {
     const templateRef = doc(db, 'formTemplates', formTemplateId);
@@ -76,9 +70,6 @@ const getTemplateData = async (formTemplateId: string): Promise<{ fields: FormFi
   return { fields: [], notes: '' };
 };
 
-/**
- * Generate PDF for approved form with proper field ordering and notes
- */
 export const generateApprovedFormPDF = async (form: ApprovedForm): Promise<jsPDF> => {
   const pdf = new jsPDF('p', 'mm', 'a4');
   const pageWidth = pdf.internal.pageSize.getWidth();
@@ -99,17 +90,16 @@ export const generateApprovedFormPDF = async (form: ApprovedForm): Promise<jsPDF
     ctx?.drawImage(logoImg, 0, 0);
     const logoData = canvas.toDataURL('image/png');
     
-    const logoY = margin - 5; // move up by 5mm (adjust as needed)
+    const logoY = margin - 5;
 
-pdf.addImage(
-  logoData,
-  'PNG',
-  margin,
-  logoY,
-  logoWidth,
-  Math.min(logoHeight, 30)
-);
-
+    pdf.addImage(
+      logoData,
+      'PNG',
+      margin,
+      logoY,
+      logoWidth,
+      Math.min(logoHeight, 30)
+    );
   } catch (error) {
     console.log('Logo not loaded, skipping');
   }
@@ -143,36 +133,24 @@ pdf.addImage(
   pdf.text(form.formName.toUpperCase(), pageWidth / 2, yPosition, { align: 'center' });
   yPosition += 10;
 
-  // Name and Date fields - NAME first, then DATE
+  // Name and Date fields - compact spacing, no lines
   pdf.setTextColor(0, 0, 0);
   pdf.setFontSize(10);
   pdf.setFont('helvetica', 'normal');
   
   const fullName = form.submittedByName || 'N/A';
-  const nameWidth = pdf.getTextWidth(fullName);
-  
-  // Name on the left
-  pdf.text('NAME:', margin, yPosition);
-  pdf.setDrawColor(150, 150, 150);
-  pdf.setLineWidth(0.3);
-  pdf.line(margin + 18, yPosition + 1, margin + 18 + nameWidth + 5, yPosition + 1);
-  pdf.text(fullName, margin + 20, yPosition);
-  
-  // Date on the right side
   const dateValue = new Date(form.submittedAt?.toDate?.() || Date.now()).toLocaleDateString('en-US', {
     year: 'numeric',
     month: 'long',
     day: 'numeric',
   });
-  const dateWidth = pdf.getTextWidth(dateValue);
-  const dateStartX = pageWidth / 2 + 40;
   
-  pdf.text('DATE:', dateStartX, yPosition);
-  pdf.line(dateStartX + 15, yPosition + 1, dateStartX + 15 + dateWidth + 5, yPosition + 1);
-  pdf.text(dateValue, dateStartX + 17, yPosition);
-  yPosition += 10;
+  // Name on the left, Date on the right - same line
+  pdf.text('NAME: ' + fullName, margin, yPosition);
+  pdf.text('DATE: ' + dateValue, pageWidth / 2 + 45, yPosition);
+  yPosition += 7;
 
-  // Get template data with fields and notes
+  // Get template data
   let templateFields: FormField[] = [];
   let templateNotes = '';
   
@@ -182,16 +160,14 @@ pdf.addImage(
     templateNotes = templateData.notes;
   }
 
-  // Render form fields in template order
+  // Render form fields
   if (templateFields.length > 0 && form.formData) {
     for (const field of templateFields) {
-      // Check if we need a new page
       if (yPosition > pageHeight - 70) {
         pdf.addPage();
         yPosition = margin;
       }
 
-      // Skip note fields (they're not answerable)
       if (field.isNote) {
         continue;
       }
@@ -207,8 +183,11 @@ pdf.addImage(
         valueText = String(value);
       }
 
+      // Check if this is a REASON field (textarea with "reason" in label)
+      const isReasonField = field.type === 'textarea' && 
+                            field.label.toLowerCase().includes('reason');
+
       if (field.type === 'checkbox') {
-        // Render checkbox
         pdf.setFont('helvetica', 'normal');
         pdf.setFontSize(10);
         pdf.setTextColor(0, 0, 0);
@@ -218,7 +197,6 @@ pdf.addImage(
         pdf.setLineWidth(0.3);
         pdf.rect(margin, yPosition - 3, checkboxSize, checkboxSize);
         
-        // If checked, draw an X
         if (value) {
           pdf.setDrawColor(0, 0, 0);
           pdf.setLineWidth(0.5);
@@ -227,81 +205,56 @@ pdf.addImage(
         }
         
         pdf.text(field.label, margin + checkboxSize + 3, yPosition);
-        yPosition += 6;
+        yPosition += 5;
+        
       } else if (field.type === 'textarea') {
-        // Render textarea
         pdf.setFont('helvetica', 'normal');
         pdf.setFontSize(10);
         pdf.setTextColor(0, 0, 0);
-        pdf.text(`${field.label}:`, margin, yPosition);
         
+        // Add extra space before REASON field
+        if (isReasonField) {
+          yPosition += 3;
+        }
+        
+        pdf.text(`${field.label}:`, margin, yPosition);
         yPosition += 5;
         
         if (valueText && valueText.length > 0) {
-          // Split text into lines
           const lines = pdf.splitTextToSize(valueText, pageWidth - 2 * margin);
           for (const line of lines) {
             if (yPosition > pageHeight - 70) {
               pdf.addPage();
               yPosition = margin;
             }
-            pdf.text(line, margin, yPosition);
+            // Justify the text
+            pdf.text(line, margin, yPosition, { align: 'justify', maxWidth: pageWidth - 2 * margin });
             yPosition += 4.5;
           }
-          yPosition += 1;
-        } else {
-          // Draw empty lines
-          const numLines = 3;
-          pdf.setDrawColor(150, 150, 150);
-          pdf.setLineWidth(0.3);
-          
-          for (let i = 0; i < numLines; i++) {
-            if (yPosition > pageHeight - 70) {
-              pdf.addPage();
-              yPosition = margin;
-            }
-            pdf.line(margin, yPosition, pageWidth - margin, yPosition);
-            yPosition += 4.5;
-          }
-          yPosition += 1;
         }
+        
+        // Add extra space after REASON field
+        if (isReasonField) {
+          yPosition += 3;
+        } else {
+          yPosition += 2;
+        }
+        
       } else {
-        // Render regular field with dynamic line length
+        // Regular fields - compact spacing, no underlines
         pdf.setFont('helvetica', 'normal');
         pdf.setFontSize(10);
         pdf.setTextColor(0, 0, 0);
         
         const labelText = `${field.label}:`;
-        pdf.text(labelText, margin, yPosition);
+        const displayText = valueText || '';
         
-        const labelWidth = pdf.getTextWidth(labelText);
-        const valueX = margin + labelWidth + 3;
-        
-        let lineLength = 0;
-        if (valueText && valueText.length > 0) {
-          const valueWidth = pdf.getTextWidth(valueText);
-          // Line length is just slightly longer than the text (add 5mm padding)
-          lineLength = valueWidth + 5;
-        } else {
-          // Default line length for empty fields
-          lineLength = 50;
-        }
-        
-        const lineEndX = Math.min(valueX + lineLength, pageWidth - margin);
-        
-        pdf.setDrawColor(150, 150, 150);
-        pdf.setLineWidth(0.3);
-        pdf.line(valueX, yPosition + 1, lineEndX, yPosition + 1);
-        
-        if (valueText && valueText.length > 0) {
-          pdf.text(valueText, valueX + 2, yPosition);
-        }
-        
-        yPosition += 6;
+        pdf.text(labelText + ' ' + displayText, margin, yPosition);
+        yPosition += 5;
       }
     }
   } else {
-    // Fallback: render fields from formData without template
+    // Fallback for forms without template
     if (form.formData && Object.keys(form.formData).length > 0) {
       const entries = Object.entries(form.formData).sort((a, b) => {
         const getFieldNumber = (key: string) => {
@@ -339,39 +292,18 @@ pdf.addImage(
         }
 
         pdf.setFont('helvetica', 'normal');
-        const labelText = `${label}:`;
-        pdf.text(labelText, margin, yPosition);
-        
-        const labelWidth = pdf.getTextWidth(labelText);
-        const valueX = margin + labelWidth + 3;
-        
-        let lineLength = 0;
-        if (valueText && valueText.length > 0) {
-          const valueWidth = pdf.getTextWidth(valueText);
-          lineLength = valueWidth + 5;
-        } else {
-          lineLength = 50;
-        }
-        
-        const lineEndX = Math.min(valueX + lineLength, pageWidth - margin);
-        
-        pdf.setDrawColor(150, 150, 150);
-        pdf.line(valueX, yPosition + 1, lineEndX, yPosition + 1);
-        
-        if (valueText && valueText.length > 0) {
-          pdf.text(valueText, valueX + 2, yPosition);
-        }
-        
-        yPosition += 6;
+        pdf.setFontSize(10);
+        const displayText = `${label}: ${valueText}`;
+        pdf.text(displayText, margin, yPosition);
+        yPosition += 5;
       }
     }
   }
 
-  // Add notes section if provided (before signatures)
+  // Add notes section
   if (templateNotes && templateNotes.trim()) {
-    yPosition += 2;
+    yPosition += 5;
     
-    // Check if we need a new page for notes
     if (yPosition > pageHeight - 90) {
       pdf.addPage();
       yPosition = margin;
@@ -401,7 +333,7 @@ pdf.addImage(
     yPosition += 3;
   }
 
-  // Calculate signature section requirements
+  // Signature section
   const approvedRecords = form.approvalTimeline?.filter(
     (record) => record.action === 'Approved'
   ) || [];
@@ -413,12 +345,11 @@ pdf.addImage(
 
   const spaceAvailable = pageHeight - yPosition - 15;
   
-  // Only add new page if absolutely necessary
   if (spaceAvailable < totalSignatureHeight) {
     pdf.addPage();
     yPosition = margin;
   } else {
-    yPosition += 2;
+    yPosition += 5;
   }
 
   // Draw signatures
@@ -503,16 +434,22 @@ pdf.addImage(
   // Approver signatures
   if (approvedRecords.length > 0) {
     for (const [index, record] of approvedRecords.entries()) {
-      if (column >= 2) {
+      // Special case: if total is 3 signatures (1 employee + 2 approvers) and this is the 2nd approver
+      if (numSignatures === 3 && index === 1) {
+        // Center the third signature below the first two
+        column = 0;
+        currentX = margin + colWidth / 2 + 5;
+        currentY += signatureBlockHeight;
+      } else if (column >= 2) {
         column = 0;
         currentX = margin;
         currentY += signatureBlockHeight;
       }
 
-      const approvalLabel = index === 0 ? "Supervisor's Approval" : 
-                             index === 1 ? "HR Approval" : 
-                             index === 2 ? "Management Approval" :
-                             `Level ${index + 1} Approval`;
+      // Use the approver's position for the label, or fall back to generic approval
+      const approvalLabel = record.byPosition 
+        ? `${record.byPosition} Approval` 
+        : `Level ${index + 1} Approval`;
       
       await drawSignature(
         record.byName || `Approver ${index + 1}`,
@@ -528,7 +465,7 @@ pdf.addImage(
     }
   }
 
-  // Footer with revision number
+  // Footer
   const footerY = pageHeight - 10;
   pdf.setTextColor(0, 0, 0);
   pdf.setFontSize(7);

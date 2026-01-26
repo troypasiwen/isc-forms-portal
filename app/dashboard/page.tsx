@@ -4,6 +4,7 @@ import { useState, useEffect } from 'react';
 import { ProtectedRoute } from '@/components/protected-route';
 import { Sidebar } from '@/components/sidebar';
 import { TopBar } from '@/components/top-bar';
+import { WelcomeAnimation } from '@/components/welcome-animation';
 import { Card } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { useAuth } from '@/lib/auth-context';
@@ -102,8 +103,18 @@ export default function DashboardPage() {
     fetchStats();
   }, [user, userData]);
 
+  const getGreeting = () => {
+    const hour = new Date().getHours();
+    if (hour < 12) return 'Good morning';
+    if (hour < 18) return 'Good afternoon';
+    return 'Good evening';
+  };
+
   return (
     <ProtectedRoute>
+      {/* Welcome Animation - shows on first login */}
+      <WelcomeAnimation />
+      
       <div className="flex">
         {/* Sidebar */}
         <Sidebar />
@@ -117,7 +128,12 @@ export default function DashboardPage() {
           <div className="bg-card border-b border-border p-6 md:p-8">
             <h1 className="text-3xl font-bold text-foreground">Dashboard</h1>
             <p className="text-muted-foreground mt-2">
-              Welcome back, {userData?.fullName}
+              {getGreeting()}, {userData?.position} {userData?.fullName} • {new Date().toLocaleDateString('en-US', { 
+                weekday: 'long', 
+                year: 'numeric', 
+                month: 'long', 
+                day: 'numeric' 
+              })}
             </p>
           </div>
 
@@ -176,7 +192,7 @@ export default function DashboardPage() {
                       System Status
                     </p>
                     <div className="flex items-center gap-2 mt-2">
-                      <div className="w-3 h-3 rounded-full bg-green-500" />
+                      <div className="w-3 h-3 rounded-full bg-green-500 animate-pulse" />
                       <p className="font-bold text-foreground">Operational</p>
                     </div>
                   </div>

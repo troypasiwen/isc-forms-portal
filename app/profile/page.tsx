@@ -8,15 +8,106 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { useAuth } from '@/lib/auth-context';
 import { Avatar, AvatarImage, AvatarFallback } from '@/components/ui/avatar';
+import { useState, useRef } from 'react';
+import { doc, updateDoc } from 'firebase/firestore';
+import { db } from '@/lib/firebase';
+import { Camera, Loader2, Upload } from 'lucide-react';
+import { useToast } from '@/hooks/use-toast';
 
 export default function ProfilePage() {
-  const { userData } = useAuth();
+  const { userData, user } = useAuth();
+  const { toast } = useToast();
+  const fileInputRef = useRef<HTMLInputElement>(null);
+  const [uploading, setUploading] = useState(false);
 
   const initials = (userData?.fullName || 'U')
     .split(' ')
     .map((n) => n[0])
     .join('')
     .toUpperCase();
+
+  const handleImageClick = () => {
+    fileInputRef.current?.click();
+  };
+
+  const handleImageChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    // Validate file type
+    if (!file.type.startsWith('image/')) {
+      toast({
+        title: 'Invalid file type',
+        description: 'Please select an image file (JPG, PNG, etc.)',
+        variant: 'destructive',
+      });
+      return;
+    }
+
+    // Validate file size (max 2MB to keep Firestore document size reasonable)
+    if (file.size > 2 * 1024 * 1024) {
+      toast({
+        title: 'File too large',
+        description: 'Please select an image smaller than 2MB',
+        variant: 'destructive',
+      });
+      return;
+    }
+
+    try {
+      setUploading(true);
+
+      // Convert to base64
+      const reader = new FileReader();
+      reader.onloadend = async () => {
+        try {
+          const base64String = reader.result as string;
+
+          // Update Firestore
+          if (user?.uid) {
+            const userRef = doc(db, 'users', user.uid);
+            await updateDoc(userRef, {
+              profilePicture: base64String,
+              updatedAt: new Date(),
+            });
+
+            toast({
+              title: 'Success',
+              description: 'Profile picture updated successfully',
+            });
+          }
+        } catch (error) {
+          console.error('Error updating profile picture:', error);
+          toast({
+            title: 'Upload failed',
+            description: 'Failed to update profile picture. Please try again.',
+            variant: 'destructive',
+          });
+        } finally {
+          setUploading(false);
+        }
+      };
+
+      reader.onerror = () => {
+        toast({
+          title: 'Upload failed',
+          description: 'Failed to read the image file',
+          variant: 'destructive',
+        });
+        setUploading(false);
+      };
+
+      reader.readAsDataURL(file);
+    } catch (error) {
+      console.error('Error uploading image:', error);
+      toast({
+        title: 'Upload failed',
+        description: 'An unexpected error occurred',
+        variant: 'destructive',
+      });
+      setUploading(false);
+    }
+  };
 
   return (
     <ProtectedRoute>
@@ -42,16 +133,41 @@ export default function ProfilePage() {
             <Card className="p-8 space-y-6">
               {/* Avatar Section */}
               <div className="flex items-center gap-6">
-                <Avatar className="w-24 h-24">
-                  <AvatarImage
-                    src={userData?.profilePicture || "/placeholder.svg"}
-                    alt={userData?.fullName}
+                <div className="relative group">
+                  <Avatar className="w-24 h-24">
+                    <AvatarImage
+                      src={userData?.profilePicture || "/placeholder.jpeg"}
+                      alt={userData?.fullName}
+                    />
+                    <AvatarFallback className="bg-primary text-primary-foreground font-bold text-xl">
+                      {initials}
+                    </AvatarFallback>
+                  </Avatar>
+                  
+                  {/* Upload overlay */}
+                  <button
+                    onClick={handleImageClick}
+                    disabled={uploading}
+                    className="absolute inset-0 bg-black/60 rounded-full opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center cursor-pointer disabled:cursor-not-allowed"
+                  >
+                    {uploading ? (
+                      <Loader2 className="w-6 h-6 text-white animate-spin" />
+                    ) : (
+                      <Camera className="w-6 h-6 text-white" />
+                    )}
+                  </button>
+                  
+                  {/* Hidden file input */}
+                  <input
+                    ref={fileInputRef}
+                    type="file"
+                    accept="image/*"
+                    onChange={handleImageChange}
+                    className="hidden"
                   />
-                  <AvatarFallback className="bg-primary text-primary-foreground font-bold text-xl">
-                    {initials}
-                  </AvatarFallback>
-                </Avatar>
-                <div>
+                </div>
+                
+                <div className="flex-1">
                   <h2 className="text-2xl font-bold text-foreground">
                     {userData?.fullName}
                   </h2>
@@ -66,6 +182,27 @@ export default function ProfilePage() {
                       </span>
                     )}
                   </div>
+                  
+                  {/* Upload button for mobile */}
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={handleImageClick}
+                    disabled={uploading}
+                    className="mt-3 md:hidden"
+                  >
+                    {uploading ? (
+                      <>
+                        <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+                        Uploading...
+                      </>
+                    ) : (
+                      <>
+                        <Upload className="w-4 h-4 mr-2" />
+                        Change Photo
+                      </>
+                    )}
+                  </Button>
                 </div>
               </div>
 
@@ -130,8 +267,8 @@ export default function ProfilePage() {
                   Account Status
                 </h3>
                 <p className="text-sm text-muted-foreground mb-4">
-                  Your account information is managed by your administrator.
-                  Contact your HR department to request changes.
+                  Your account information is managed by IT Administrator.
+                  Contact your IT Officer to request changes.
                 </p>
               </div>
             </Card>

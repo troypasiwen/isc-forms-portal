@@ -3,6 +3,7 @@
 import { useState, useEffect } from 'react';
 import { ProtectedRoute } from '@/components/protected-route';
 import { Sidebar } from '@/components/sidebar';
+
 import { Card } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { db } from '@/lib/firebase';
@@ -53,7 +54,6 @@ export default function FormsPortalPage() {
       <div className="flex">
         {/* Sidebar */}
         <Sidebar />
-
         {/* Main Content */}
         <main className="flex-1 bg-background md:ml-64">
           {/* Top Bar */}
