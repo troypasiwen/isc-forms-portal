@@ -14,10 +14,18 @@ export const metadata: Metadata = {
   description: 'Forms Portal Dedicated for Inter-World Shipping Corporation',
   generator: 'v0.app',
   icons: {
-    // This points to public/isc-logo.png
-    icon: '/isc-logo.png', 
-    // If you want to use the same logo for Apple devices
-    apple: '/isc-logo.png', 
+    // Multiple sizes for better compatibility
+    icon: [
+      { url: '/isc-logo.png?v=2', sizes: '32x32', type: 'image/png' },
+      { url: '/isc-logo.png?v=2', sizes: '16x16', type: 'image/png' },
+      { url: '/favicon.ico?v=2', sizes: 'any' }, // Fallback to .ico if you have it
+    ],
+    // Apple touch icon
+    apple: [
+      { url: '/isc-logo.png?v=2', sizes: '180x180', type: 'image/png' },
+    ],
+    // Shortcut icon (legacy support)
+    shortcut: '/isc-logo.png?v=2',
   },
 }
 
