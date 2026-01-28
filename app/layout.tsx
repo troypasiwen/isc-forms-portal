@@ -11,24 +11,13 @@ const _geistMono = Geist_Mono({ subsets: ["latin"] });
 
 export const metadata: Metadata = {
   title: 'ISC Forms Portal',
-  description: 'Employee and HR Forms Management System',
+  description: 'Forms Portal Dedicated for Inter-World Shipping Corporation',
   generator: 'v0.app',
   icons: {
-    icon: [
-      {
-        url: '/icon-light-32x32.png',
-        media: '(prefers-color-scheme: light)',
-      },
-      {
-        url: '/icon-dark-32x32.png',
-        media: '(prefers-color-scheme: dark)',
-      },
-      {
-        url: '/icon.svg',
-        type: 'image/svg+xml',
-      },
-    ],
-    apple: '/apple-icon.png',
+    // This points to public/isc-logo.png
+    icon: '/isc-logo.png', 
+    // If you want to use the same logo for Apple devices
+    apple: '/isc-logo.png', 
   },
 }
 
